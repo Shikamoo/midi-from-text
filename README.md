@@ -4,6 +4,32 @@ A browser-based music sketch tool built with React, TypeScript, and Vite.
 
 MIDI from Text lets you create simple musical ideas from either natural-language prompts or typed note input, preview them in the browser, shape the harmony, and export the result as MIDI.
 
+## Screenshots
+
+### Prompt mode
+
+Describe a musical idea in plain language, set tempo/key/instrument, and generate.
+
+![Prompt mode](assets/MFT-Prompt.png)
+
+### Notes mode
+
+Type note sequences directly, preview playback, and export when ready.
+
+![Notes mode](assets/MFTNotes.png)
+
+### Exported MIDI — melody track
+
+Downloaded MIDI opened in a DAW with separate melody and harmony tracks.
+
+![Melody track in a DAW](assets/MFTMelody.png)
+
+### Exported MIDI — harmony track
+
+Harmony chords generated from the melody, ready for further production.
+
+![Harmony track in a DAW](assets/MFTHarmony.png)
+
 ## Features
 
 - Generate music from text prompts
