@@ -1,0 +1,17 @@
+---
+description: Rules for the browser MIDI-from-text app
+globs: src/**/*.ts,src/**/*.tsx
+alwaysApply: false
+---
+
+- Treat music parsing, prompt interpretation, score generation, and MIDI export as separate concerns.
+- Keep business logic in pure utility functions.
+- Keep React hooks orchestration-focused, not logic-heavy.
+- Never generate MIDI directly from raw prompt text.
+- Always convert user input into a canonical typed score model first.
+- Prefer deterministic algorithms over randomness.
+- Favor motif + variation for melody generation.
+- Keep prompt interpretation explainable through assumptions and confidence.
+- When changing export logic, ensure previewed notes and exported MIDI stay identical.
+- Briefly explain planned file changes before editing.
+- Report build/lint status after changes.
