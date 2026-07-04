@@ -15,6 +15,8 @@ import {
   tilePhrase,
 } from './score/melodyHelpers';
 import { deriveHarmony } from './score/harmony';
+import { resolveHarmonyContext, measureHarmonyVoicing } from './score/harmonyIntent';
+import { harmonyChordSlotsPerBar } from './harmonySettings';
 import { resolveStylePreset } from './score/stylePresets';
 import {
   deriveBassLine,
@@ -47,9 +49,21 @@ export function planToScore(
   };
 
   const resolvedHarmony = resolveHarmonySettingsForTexture(plan, harmonyGeneration);
+  const harmonyCtx = resolveHarmonyContext(plan, scale);
+  const slotsPerBar = harmonyChordSlotsPerBar(resolvedHarmony);
 
   const harmonyTokens = shouldGenerateHarmony(plan)
     ? deriveHarmony(melodyScore, plan, scale, preset, resolvedHarmony)
+    : undefined;
+
+  const harmonySlotCount = harmonyTokens
+    ? melodyScore.bars.length * slotsPerBar
+    : 0;
+  const harmonyNotesPerSlot = harmonyTokens && harmonySlotCount > 0
+    ? harmonyTokens.length / harmonySlotCount
+    : undefined;
+  const harmonyVoicingRealized = harmonyTokens
+    ? measureHarmonyVoicing(harmonyTokens, harmonySlotCount, harmonyCtx, resolvedHarmony.bassDoubling)
     : undefined;
 
   const bassTokens = shouldGenerateBass(plan)
@@ -61,6 +75,8 @@ export function planToScore(
     harmonyTokens,
     bassTokens,
     harmonyGeneration: resolvedHarmony,
+    harmonyNotesPerSlot,
+    harmonyVoicingRealized,
   };
 }
 

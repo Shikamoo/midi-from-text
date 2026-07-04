@@ -5,9 +5,10 @@
  */
 
 import type { MusicConfig, MusicData } from '../types/music';
-import { parseMusicInput, parseResultToMusicData, type PromptPlanOverride } from './parseMusicInput';
+import { parseMusicInput, parseResultToMusicData, type PromptPlanOverride, type PlanHardOverrides } from './parseMusicInput';
 import { scoreFingerprint } from './scoreVerification';
 import { DEFAULT_HARMONY_GENERATION, harmonyGenerationFromConfig } from './harmonySettings';
+import { DEFAULT_MELODY_DENSITY } from './melodySettings';
 
 export const DEFAULT_CONFIG: MusicConfig = {
   mode: 'prompt',
@@ -26,6 +27,7 @@ export const DEFAULT_CONFIG: MusicConfig = {
   harmonyBassDoubling: DEFAULT_HARMONY_GENERATION.bassDoubling,
   harmonyChordDensity: DEFAULT_HARMONY_GENERATION.chordDensity,
   harmonyCadenceStrength: DEFAULT_HARMONY_GENERATION.cadenceStrength,
+  melodyDensity: DEFAULT_MELODY_DENSITY,
 };
 
 export interface EngineResult {
@@ -39,6 +41,8 @@ export interface EngineResult {
 /** Optional planner output — when set, prompt mode skips rule-based promptToPlan. */
 export interface GenerateMusicOptions {
   promptPlanOverride?: PromptPlanOverride;
+  /** Settings fields explicitly set by the user — override prompt-parsed values. */
+  settingsOverrides?: PlanHardOverrides;
 }
 
 export function generateMusic(
@@ -67,7 +71,9 @@ export function generateMusic(
     bars: rawConfig.bars,
     instrument: rawConfig.instrument,
     harmonyGeneration: harmonyGenerationFromConfig(rawConfig),
+    melodyDensity: rawConfig.melodyDensity,
     promptPlanOverride: options.promptPlanOverride,
+    settingsOverrides: options.settingsOverrides,
   });
 
   if (input.hasErrors) {

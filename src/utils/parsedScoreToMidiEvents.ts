@@ -49,13 +49,15 @@ export function parsedScoreToMusicData(
   ];
 
   if (score.harmonyTokens && score.harmonyTokens.length > 0) {
+    const notesPerSlot = score.harmonyNotesPerSlot
+      ?? harmonyNotesPerChord(score.harmonyGeneration);
     tracks.push({
       name: 'Harmony',
       instrument: meta.harmonyInstrument ?? HARMONY_INSTRUMENT,
       notes: harmonyTokensToNoteEvents(
         score.harmonyTokens,
         score.beatsPerBar,
-        harmonyNotesPerChord(score.harmonyGeneration),
+        notesPerSlot,
       ),
     });
   }

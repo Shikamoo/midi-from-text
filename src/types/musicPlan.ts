@@ -1,9 +1,4 @@
-/**
- * musicPlan.ts
- *
- * Structured music intent extracted from natural-language prompts.
- * Sits between raw prompt text and concrete note generation (planToScore).
- */
+import type { MelodyDensity } from './music';
 
 // ─── Enumerated musical attributes ───────────────────────────────────────────
 
@@ -141,6 +136,8 @@ export interface MusicPlan {
   stepLeapBalance: number;
   /** Strength of phrase endings / cadences (0–1) */
   cadenceStrength: number;
+  /** User UI melody density — melody generation only; does not affect harmony. */
+  userMelodyDensity?: MelodyDensity;
 }
 
 // ─── Parser result ─────────────────────────────────────────────────────────────

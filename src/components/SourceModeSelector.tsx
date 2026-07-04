@@ -25,18 +25,18 @@ const SOURCE_OPTIONS: SourceOption[] = [
   },
   {
     id: 'bass-only',
-    label: 'Bass range',
-    description: 'Low-pass ≤ 300 Hz. Best for bass guitar, double bass, cello.',
+    label: 'Bass stem only',
+    description: 'Low-pass ≤ 300 Hz bass band. Note detection runs on the bass stem only.',
   },
   {
     id: 'other-only',
-    label: 'Upper range',
-    description: 'High-pass > 300 Hz. Best for melody lines and chords.',
+    label: 'Other stem only',
+    description: 'High-pass > 300 Hz upper band. Note detection runs on the non-bass stem only.',
   },
   {
     id: 'split-both',
-    label: 'Split by register',
-    description: 'Detect bass and upper ranges separately → two-track MIDI.',
+    label: 'Split and extract both',
+    description: 'Separate bass and upper detection → two-track MIDI export.',
   },
 ];
 
@@ -150,12 +150,13 @@ export function SourceModeSelector({
 
       {/* How it works hint */}
       <div className="source-approx-warning">
-        <span className="source-approx-icon">ℹ</span>
+        <span className="source-approx-icon">⚠</span>
         <span>
-          Approximate split by pitch register, not true instrument isolation.
-          A 300 Hz crossover separates the bass band from the upper band.
-          Best results with recordings that have a clear low bass instrument
-          separate from melody — not for isolating piano left vs. right hand.
+          Approximate pre-processing only — not true source separation.
+          A 300 Hz crossover splits bass from upper register; piano melody vs.
+          accompaniment and classical left-hand vs. right-hand cannot be
+          reliably isolated. Best for recordings with a distinct bass
+          instrument (bass guitar, double bass, cello) separate from melody.
         </span>
       </div>
     </div>

@@ -237,7 +237,7 @@ export function useAudioAnalysis() {
           );
           const effectiveRange = pitchRange === 'auto' ? 'bass' : pitchRange;
           notes.bassNotes = framesToNotes(frames, bpm, effectiveRange);
-          analysedSource = 'Bass range';
+          analysedSource = 'Bass stem only';
 
         } else if (sourceMode === 'other-only') {
           const frames = await detectPitches(other, (pct) =>
@@ -245,7 +245,7 @@ export function useAudioAnalysis() {
           );
           const effectiveRange = pitchRange === 'auto' ? 'mid-high' : pitchRange;
           notes.otherNotes = framesToNotes(frames, bpm, effectiveRange);
-          analysedSource = 'Upper range';
+          analysedSource = 'Other stem only';
 
         } else {
           // split-both: detect both register bands, progress tracks bass (0-50) then other (50-100)
@@ -258,7 +258,7 @@ export function useAudioAnalysis() {
             setState((s) => ({ ...s, progress: 50 + Math.round(pct / 2) })),
           );
           notes.otherNotes = framesToNotes(otherFrames, bpm, 'mid-high');
-          analysedSource = 'Bass range + Upper range (2-track)';
+          analysedSource = 'Split and extract both (2-track)';
         }
       }
 
@@ -271,7 +271,12 @@ export function useAudioAnalysis() {
       }
 
       if (sourceMode !== 'full-mix') {
-        warnings.push('Register split only — not true source separation. Notes near the 300 Hz crossover may appear in both ranges.');
+        warnings.push(
+          'Register split only — not true source separation. Notes near the 300 Hz crossover may bleed between stems.',
+        );
+        warnings.push(
+          'Piano and classical recordings: melody/accompaniment separation is approximate. Expect overlap between bass and upper stems.',
+        );
       }
 
       // Record the BPM used so we can warn if the user changes it post-analysis

@@ -3,9 +3,18 @@
  */
 
 import type { PlannerMusicPlan } from './schema.js';
-import { normalizeMusicPlan, musicPlanJsonSchema } from './schema.js';
-import { buildPlannerSystemPrompt, buildPlannerUserMessage } from './prompts.js';
-import { resolveOllamaConfig, type OllamaPlannerConfig } from './config.js';
+import {
+  tryNormalizeMusicPlan,
+  extractJsonFromString,
+  musicPlanJsonSchema,
+  type PlannerParseDebug,
+} from './schema.js';
+import {
+  buildPlannerSystemPrompt,
+  buildPlannerUserMessage,
+  buildRepairUserMessage,
+} from './prompts.js';
+import { resolveOllamaConfig, isPlannerDebugEnabled, type OllamaPlannerConfig } from './config.js';
 
 export { resolveOllamaConfig };
 
@@ -19,59 +28,197 @@ export interface PlannerRequest {
 export interface OllamaPlanSuccess {
   ok: true;
   plan: PlannerMusicPlan;
+  debug?: PlannerParseDebug;
 }
 
 export interface OllamaPlanFailure {
   ok: false;
   code: 'timeout' | 'connection' | 'invalid_json' | 'validation' | 'empty' | 'model_missing' | 'unknown';
   error: string;
+  debug?: PlannerParseDebug;
 }
 
 export type OllamaPlanOutcome = OllamaPlanSuccess | OllamaPlanFailure;
+
+type ParseFailureCode = 'invalid_json' | 'validation' | 'empty';
+
+interface ParsedContentFailure {
+  ok: false;
+  code: ParseFailureCode;
+  error: string;
+  debug: PlannerParseDebug;
+}
+
+interface ParsedContentSuccess {
+  ok: true;
+  plan: PlannerMusicPlan;
+  debug: PlannerParseDebug;
+}
+
+type ParsedContentOutcome = ParsedContentSuccess | ParsedContentFailure;
 
 export async function planWithOllama(
   request: PlannerRequest,
   config: OllamaPlannerConfig = resolveOllamaConfig(),
 ): Promise<OllamaPlanOutcome> {
   const temperature = request.temperature ?? config.defaultTemperature;
+  const debugEnabled = isPlannerDebugEnabled();
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const outcome = await callOllamaOnce(request, config, temperature);
-    if (outcome.ok) return outcome;
-    if (outcome.code !== 'invalid_json' && outcome.code !== 'validation' && outcome.code !== 'empty') {
-      return outcome;
-    }
-    console.warn(`[local-planner] parse failed (attempt ${attempt + 1}/2): ${outcome.error}`);
-  }
+  const first = await requestStructuredPlan(request, config, temperature, debugEnabled);
+  if (first.ok) return first;
+
+  if (first.code !== 'validation') return first;
+
+  const retry = await requestModelRepairRetry(
+    request,
+    config,
+    temperature,
+    debugEnabled,
+    first.debug ?? {},
+  );
+
+  if (retry.ok) return retry;
 
   return {
     ok: false,
     code: 'validation',
-    error: 'Ollama returned invalid planner JSON after retry.',
+    error: buildValidationErrorMessage(retry.debug),
+    debug: retry.debug,
   };
 }
 
-async function callOllamaOnce(
+function buildValidationErrorMessage(debug?: PlannerParseDebug): string {
+  const base = debug?.retryAttempted
+    ? 'Ollama returned invalid planner JSON after model repair retry.'
+    : 'Ollama returned invalid planner JSON.';
+  if (!debug?.primaryFailureField) return base;
+  return `${base} Most frequent failure: ${debug.primaryFailureField}.`;
+}
+
+async function requestStructuredPlan(
   request: PlannerRequest,
   config: OllamaPlannerConfig,
   temperature: number,
+  debugEnabled: boolean,
 ): Promise<OllamaPlanOutcome> {
+  const messages = [
+    { role: 'system', content: buildPlannerSystemPrompt() },
+    {
+      role: 'user',
+      content: buildPlannerUserMessage(request.prompt, {
+        bars: request.bars,
+        temperature,
+        seed: request.seed,
+      }),
+    },
+  ];
+
+  const fetchOutcome = await postOllamaChat(messages, config, temperature);
+  if (!fetchOutcome.ok) return fetchOutcome;
+
+  const parsed = parseOllamaContent(
+    fetchOutcome.content,
+    request.prompt,
+    debugEnabled,
+    'initial',
+  );
+  if (!parsed.ok) {
+    if (debugEnabled) logValidationFailure(parsed.debug, 'initial');
+    return {
+      ok: false,
+      code: parsed.code,
+      error: parsed.code === 'invalid_json'
+        ? 'Ollama response was not valid JSON.'
+        : formatValidationFailure(parsed.debug),
+      debug: parsed.debug,
+    };
+  }
+
+  applySeedVariation(parsed.plan, request.seed);
+  return buildSuccessOutcome(parsed, debugEnabled);
+}
+
+async function requestModelRepairRetry(
+  request: PlannerRequest,
+  config: OllamaPlannerConfig,
+  temperature: number,
+  debugEnabled: boolean,
+  firstDebug: PlannerParseDebug,
+): Promise<OllamaPlanOutcome> {
+  const invalidJson = firstDebug.repairedJson ?? firstDebug.parsedJson ?? firstDebug.rawContent ?? {};
+  const validationErrors = firstDebug.validationErrors ?? ['Unknown validation failure'];
+  const repairPrompt = buildRepairUserMessage(invalidJson, validationErrors);
+
+  const retryDebug: PlannerParseDebug = {
+    ...firstDebug,
+    retryAttempted: true,
+    retryPromptSize: repairPrompt.length,
+    retrySucceeded: false,
+  };
+
+  if (debugEnabled) {
+    console.warn('[local-planner][debug] attempting model repair retry');
+    console.warn(`[local-planner][debug] repair prompt size: ${repairPrompt.length} chars`);
+  }
+
+  const messages = [
+    { role: 'system', content: buildPlannerSystemPrompt() },
+    { role: 'user', content: repairPrompt },
+  ];
+
+  const fetchOutcome = await postOllamaChat(messages, config, temperature);
+  if (!fetchOutcome.ok) {
+    return { ...fetchOutcome, debug: retryDebug };
+  }
+
+  retryDebug.retryRawContent = fetchOutcome.content;
+
+  const parsed = parseOllamaContent(
+    fetchOutcome.content,
+    request.prompt,
+    debugEnabled,
+    'retry',
+  );
+
+  if (!parsed.ok) {
+    if (debugEnabled) logValidationFailure(parsed.debug, 'retry');
+    return {
+      ok: false,
+      code: parsed.code,
+      error: parsed.code === 'invalid_json'
+        ? 'Model repair retry was not valid JSON.'
+        : formatValidationFailure({ ...retryDebug, ...parsed.debug }),
+      debug: { ...retryDebug, ...parsed.debug, retryAttempted: true, retrySucceeded: false },
+    };
+  }
+
+  retryDebug.retrySucceeded = true;
+  applySeedVariation(parsed.plan, request.seed);
+
+  if (debugEnabled) {
+    console.info('[local-planner][debug] model repair retry succeeded');
+  }
+
+  return buildSuccessOutcome(
+    { ok: true, plan: parsed.plan, debug: { ...retryDebug, ...parsed.debug } },
+    debugEnabled,
+  );
+}
+
+type FetchSuccess = { ok: true; content: string };
+type FetchFailure = OllamaPlanFailure;
+
+async function postOllamaChat(
+  messages: Array<{ role: string; content: string }>,
+  config: OllamaPlannerConfig,
+  temperature: number,
+): Promise<FetchSuccess | FetchFailure> {
   const url = `${config.baseUrl}/api/chat`;
   const body = {
     model: config.model,
     stream: false,
     format: musicPlanJsonSchema(),
-    messages: [
-      { role: 'system', content: buildPlannerSystemPrompt() },
-      {
-        role: 'user',
-        content: buildPlannerUserMessage(request.prompt, {
-          bars: request.bars,
-          temperature,
-          seed: request.seed,
-        }),
-      },
-    ],
+    messages,
     options: { temperature },
   };
 
@@ -104,26 +251,7 @@ async function callOllamaOnce(
       return { ok: false, code: 'empty', error: 'Ollama returned an empty response.' };
     }
 
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      return { ok: false, code: 'invalid_json', error: 'Ollama response was not valid JSON.' };
-    }
-
-    try {
-      const plan = normalizeMusicPlan(raw, request.prompt);
-      if (request.seed !== undefined) {
-        plan.variation = Math.min(1, plan.variation + ((request.seed % 1000) / 1000) * 0.12);
-      }
-      return { ok: true, plan };
-    } catch (err) {
-      return {
-        ok: false,
-        code: 'validation',
-        error: err instanceof Error ? err.message : 'Planner output failed validation.',
-      };
-    }
+    return { ok: true, content };
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       return {
@@ -143,6 +271,97 @@ async function callOllamaOnce(
     return { ok: false, code: 'unknown', error: message };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+function parseOllamaContent(
+  content: string,
+  promptFallback: string,
+  debugEnabled: boolean,
+  phase: 'initial' | 'retry',
+): ParsedContentOutcome {
+  if (debugEnabled) {
+    console.info(`[local-planner][debug] raw Ollama message.content (${phase}, before schema parse):`);
+    console.info(content);
+  }
+
+  let parseDebug: PlannerParseDebug = { rawContent: content };
+  const extracted = extractJsonFromString(content);
+  if (!extracted) {
+    return {
+      ok: false,
+      code: 'invalid_json',
+      error: 'Ollama response was not valid JSON.',
+      debug: { ...parseDebug, validationErrors: ['Response was not valid JSON'] },
+    };
+  }
+
+  parseDebug = {
+    rawContent: content,
+    parsedJson: extracted.value,
+    repairActions: extracted.action ? [extracted.action] : undefined,
+  };
+
+  const result = tryNormalizeMusicPlan(extracted.value, promptFallback, content);
+  const debug = mergeDebug(parseDebug, result.debug);
+
+  if (result.ok) {
+    if (debugEnabled && debug.repairActions?.length) {
+      console.info(`[local-planner][debug] repair actions (${phase}):`, debug.repairActions);
+    }
+    return { ok: true, plan: result.plan, debug };
+  }
+
+  return {
+    ok: false,
+    code: 'validation',
+    error: formatValidationFailure(debug),
+    debug,
+  };
+}
+
+function buildSuccessOutcome(
+  parsed: ParsedContentSuccess,
+  debugEnabled: boolean,
+): OllamaPlanSuccess {
+  const hasDebug = debugEnabled
+    || (parsed.debug.repairActions?.length ?? 0) > 0
+    || parsed.debug.retryAttempted;
+  return {
+    ok: true,
+    plan: parsed.plan,
+    debug: hasDebug ? parsed.debug : undefined,
+  };
+}
+
+function applySeedVariation(plan: PlannerMusicPlan, seed: number | undefined): void {
+  if (seed !== undefined) {
+    plan.variation = Math.min(1, plan.variation + ((seed % 1000) / 1000) * 0.12);
+  }
+}
+
+function mergeDebug(base: PlannerParseDebug, next: PlannerParseDebug): PlannerParseDebug {
+  return {
+    ...base,
+    ...next,
+    rawContent: base.rawContent ?? next.rawContent,
+    repairActions: [...(base.repairActions ?? []), ...(next.repairActions ?? [])],
+  };
+}
+
+function formatValidationFailure(debug: PlannerParseDebug): string {
+  const first = debug.validationErrors?.[0];
+  const fieldHint = debug.primaryFailureField ? ` (field: ${debug.primaryFailureField})` : '';
+  return first
+    ? `Planner output failed validation${fieldHint}: ${first}`
+    : 'Planner output failed validation.';
+}
+
+function logValidationFailure(debug: PlannerParseDebug, phase: 'initial' | 'retry'): void {
+  console.warn(`[local-planner][debug] schema validation failed (${phase}):`);
+  for (const line of debug.validationErrors ?? []) console.warn(`  ${line}`);
+  if (debug.primaryFailureField) {
+    console.warn(`[local-planner][debug] primary failing field: ${debug.primaryFailureField}`);
   }
 }
 

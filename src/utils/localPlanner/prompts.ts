@@ -45,3 +45,22 @@ export function buildPlannerUserMessage(
 
   return lines.join('\n');
 }
+
+/** User message for the single model-assisted repair retry after schema failure. */
+export function buildRepairUserMessage(
+  invalidJson: unknown,
+  validationErrors: string[],
+): string {
+  const jsonBlock = JSON.stringify(invalidJson, null, 2);
+  const errorsBlock = validationErrors.map((err) => `- ${err}`).join('\n');
+
+  return `Your previous JSON response failed schema validation.
+
+PREVIOUS JSON:
+${jsonBlock}
+
+VALIDATION ERRORS:
+${errorsBlock}
+
+Return corrected JSON only. No markdown. No explanation.`;
+}

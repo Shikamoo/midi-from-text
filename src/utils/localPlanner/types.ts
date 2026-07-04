@@ -3,6 +3,9 @@
  */
 
 import type { PlannerMusicPlan } from './schema.js';
+import type { PlannerParseDebug } from './schemaDebug.js';
+
+export type { PlannerParseDebug as PlannerDebugInfo } from './schemaDebug.js';
 
 export type PlannerStatus =
   | 'disabled'
@@ -28,6 +31,7 @@ export interface PlanApiSuccess {
   plan: PlannerMusicPlan;
   model?: string;
   warning?: string;
+  debug?: PlannerParseDebug;
 }
 
 export interface PlanApiDisabled {

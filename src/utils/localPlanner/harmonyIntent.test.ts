@@ -27,13 +27,16 @@ describe('planner harmony intent', () => {
 
   it('uses planner scale intervals for harmony when plannerIntent is present', () => {
     const major = mapToGeneratorPlan(plannerWith({ ...chordBase, scaleType: 'major' })).plan;
-    const dorian = mapToGeneratorPlan(plannerWith({ ...chordBase, scaleType: 'dorian' })).plan;
+    const dorian = mapToGeneratorPlan(
+      plannerWith({ ...chordBase, texture: 'polyphonic', scaleType: 'dorian', harmonicComplexity: 0.8 }),
+    ).plan;
 
     const majorCtx = resolveHarmonyContext(major, buildScaleContext(major));
     const dorianCtx = resolveHarmonyContext(dorian, buildScaleContext(dorian));
     expect(majorCtx.modalFallback).toBe(false);
     expect(dorianCtx.modalFallback).toBe(true);
-    expect(dorianCtx.accompanimentStyle).toBe('modal-triads');
+    expect(majorCtx.accompanimentStyle).toBe('open-fifths');
+    expect(dorianCtx.accompanimentStyle).toBe('quartal-stack');
 
     const majorHarmony = planToScore(major).harmonyTokens;
     const dorianHarmony = planToScore(dorian).harmonyTokens;
@@ -50,9 +53,11 @@ describe('planner harmony intent', () => {
     expect(ctx.accompanimentStyle).toBe('open-fifths');
 
     const pentHarmony = planToScore(plan).harmonyTokens;
-    const majorPlan = mapToGeneratorPlan(plannerWith({ ...chordBase, scaleType: 'major' })).plan;
+    expect(pentHarmony?.length).toBe(plan.bars * 2);
+    const majorPlan = mapToGeneratorPlan(
+      plannerWith({ ...chordBase, texture: 'polyphonic', scaleType: 'major', harmonicComplexity: 0.8 }),
+    ).plan;
     const majorHarmony = planToScore(majorPlan).harmonyTokens;
-    expect(pentHarmony?.length).toBeGreaterThan(0);
     expect(harmonyMidiFingerprint(pentHarmony)).not.toBe(
       harmonyMidiFingerprint(majorHarmony),
     );
@@ -60,7 +65,7 @@ describe('planner harmony intent', () => {
 
   it('uses quartal stacks for polyphonic modal scales', () => {
     const { plan } = mapToGeneratorPlan(
-      plannerWith({ ...chordBase, texture: 'polyphonic', scaleType: 'mixolydian' }),
+      plannerWith({ ...chordBase, texture: 'polyphonic', scaleType: 'mixolydian', harmonicComplexity: 0.8 }),
     );
     const ctx = resolveHarmonyContext(plan, buildScaleContext(plan));
     expect(ctx.accompanimentStyle).toBe('quartal-stack');

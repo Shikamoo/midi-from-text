@@ -5,9 +5,10 @@ interface Props {
   error: string | null;
   warnings: string[];
   hint?: string;
+  onRetry?: () => void;
 }
 
-export function StatusBar({ status, error, warnings, hint }: Props) {
+export function StatusBar({ status, error, warnings, hint, onRetry }: Props) {
   if (status === 'idle' && !hint) return null;
 
   return (
@@ -25,6 +26,20 @@ export function StatusBar({ status, error, warnings, hint }: Props) {
       {status === 'error' && error && (
         <span className="status-message error">
           ✕ {error}
+        </span>
+      )}
+      {status === 'timeout' && (
+        <span className="status-message timeout">
+          ⏱ {error ?? 'This is taking longer than expected.'}
+          {onRetry && (
+            <button
+              className="status-retry-btn"
+              onClick={onRetry}
+              type="button"
+            >
+              Retry
+            </button>
+          )}
         </span>
       )}
       {status === 'idle' && hint && (

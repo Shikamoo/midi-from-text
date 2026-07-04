@@ -12,7 +12,7 @@ import { detectInputMode } from './detectInputMode';
 import { normalizeMusicText } from './normalizeMusicText';
 import { parseStrictNotes } from './parseStrictNotes';
 import { groupIntoBars } from './groupIntoBars';
-import { promptToPlan, describeMusicPlan } from './promptToPlan';
+import { promptToPlan, describeMusicPlan, type PlanHardOverrides } from './promptToPlan';
 import { planToScore } from './planToScore';
 import { scoreToCanonicalText } from './scoreToCanonicalText';
 import {
@@ -24,6 +24,7 @@ import type { MusicPlan, PlanAssumption } from '../types/musicPlan';
 import type { LlmMusicPlan } from '../types/llmMusicPlan';
 import type { FieldMappingNote } from './localPlanner/mappingAudit';
 import { DEFAULT_HARMONY_GENERATION } from './harmonySettings';
+import { applyMelodyDensityToPlan, type MelodyDensity } from './melodySettings';
 
 export interface PromptPlanOverride {
   plan: MusicPlan;
@@ -49,9 +50,19 @@ export interface ParseMusicInputOptions {
   instrument?: number;
   /** Prompt-mode harmony generation (affects fingerprint). */
   harmonyGeneration?: HarmonyGenerationSettings;
+  /** Prompt-mode melody density (melody track only). */
+  melodyDensity?: MelodyDensity;
   /** Skip promptToPlan when a planner or cached plan is supplied. */
   promptPlanOverride?: PromptPlanOverride;
+  /**
+   * Settings fields that were explicitly set by the user. These always win
+   * over any values extracted from the prompt text. Only applies to the
+   * rules-based promptToPlan path (not when promptPlanOverride is set).
+   */
+  settingsOverrides?: PlanHardOverrides;
 }
+
+export type { PlanHardOverrides };
 
 export interface ParseMusicInputResult {
   detectedMode: DetectedMode;
@@ -120,6 +131,7 @@ function resolveOptions(options: ParseMusicInputOptions) {
     bars: options.bars ?? 4,
     instrument: options.instrument ?? 0,
     harmonyGeneration: options.harmonyGeneration ?? DEFAULT_HARMONY_GENERATION,
+    melodyDensity: options.melodyDensity ?? 'normal',
   };
 }
 
@@ -132,15 +144,19 @@ function runPromptPipeline(
   const override = options.promptPlanOverride;
   const { plan, confidence, assumptions } = override
     ? { plan: override.plan, confidence: override.confidence, assumptions: override.assumptions }
-    : promptToPlan(text, {
-        tempo: defaults.bpm,
-        key: defaults.key,
-        mode: defaults.mode,
-        beatsPerBar: defaults.beatsPerBar,
-        beatValue: defaults.beatValue,
-        bars: defaults.bars,
-        instrument: defaults.instrument,
-      });
+    : promptToPlan(
+        text,
+        {
+          tempo: defaults.bpm,
+          key: defaults.key,
+          mode: defaults.mode,
+          beatsPerBar: defaults.beatsPerBar,
+          beatValue: defaults.beatValue,
+          bars: defaults.bars,
+          instrument: defaults.instrument,
+        },
+        options.settingsOverrides ?? {},
+      );
 
   return buildPromptParseResult(text, detectedMode, plan, confidence, assumptions, defaults, {
     source: override?.source,
@@ -158,7 +174,8 @@ export function buildPromptParseResult(
   defaults: ReturnType<typeof resolveOptions>,
   meta: { source?: 'ollama' | 'fallback' | 'rules'; plannerMessage?: string | null } = {},
 ): ParseMusicInputResult {
-  const score = planToScore(plan, defaults.harmonyGeneration);
+  const melodyPlan = applyMelodyDensityToPlan(plan, defaults.melodyDensity);
+  const score = planToScore(melodyPlan, defaults.harmonyGeneration);
   const normalizedText = scoreToCanonicalText(score);
   const exportMeta: ScoreExportMetadata = {
     key: plan.key,
@@ -200,7 +217,7 @@ export function buildPromptParseResult(
     normalizedText,
     parsedScore: score,
     previewData,
-    musicPlan: plan,
+    musicPlan: melodyPlan,
     planConfidence: confidence,
     assumptions,
     issues,

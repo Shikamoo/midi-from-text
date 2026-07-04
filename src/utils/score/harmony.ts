@@ -19,6 +19,7 @@ import {
   voicingWidthParams,
 } from '../harmonySettings';
 import {
+  minVoicingMidiForDensity,
   penultimateHarmonyDegree,
   resolveHarmonyContext,
   type HarmonyContext,
@@ -48,6 +49,65 @@ const MINOR_DIATONIC: Record<number, { triad: number[]; seventh: number[] }> = {
   5: { triad: [0, 4, 7], seventh: [0, 4, 7, 11] },
   6: { triad: [0, 4, 7], seventh: [0, 4, 7, 10] },
 };
+
+/** Modal seventh spellings for guide-tone shells (semitones from chord root). */
+const DORIAN_SEVENTHS: number[][] = [
+  [0, 3, 7, 10],
+  [0, 3, 7, 10],
+  [0, 4, 7, 11],
+  [0, 4, 7, 11],
+  [0, 3, 7, 10],
+  [0, 3, 7, 10],
+  [0, 4, 7, 10],
+];
+
+const MIXOLYDIAN_SEVENTHS: number[][] = [
+  [0, 4, 7, 10],
+  [0, 3, 7, 10],
+  [0, 3, 6, 10],
+  [0, 4, 7, 11],
+  [0, 3, 7, 10],
+  [0, 3, 7, 10],
+  [0, 4, 7, 11],
+];
+
+export type GuideToneShellQuality = 'major7' | 'minor7' | 'dominant7' | 'unsupported';
+
+export function classifyGuideToneShellQuality(
+  thirdOffset: number,
+  seventhOffset: number,
+): GuideToneShellQuality {
+  if (thirdOffset === 4 && seventhOffset === 11) return 'major7';
+  if (thirdOffset === 3 && seventhOffset === 10) return 'minor7';
+  if (thirdOffset === 4 && seventhOffset === 10) return 'dominant7';
+  return 'unsupported';
+}
+
+/** Semitone offsets for 3rd and 7th guide tones, or null when shells should fall back. */
+export function guideToneShellSemitones(
+  rootDegree: number,
+  ctx: HarmonyContext,
+): [number, number] | null {
+  const degree = rootDegree % 7;
+
+  if (ctx.scaleId === 'major' || ctx.harmonyMode === 'major') {
+    const chord = MAJOR_DIATONIC[degree].seventh;
+    return [chord[1], chord[3]];
+  }
+  if (ctx.scaleId === 'minor' || ctx.harmonyMode === 'minor') {
+    const chord = MINOR_DIATONIC[degree].seventh;
+    return [chord[1], chord[3]];
+  }
+  if (ctx.scaleId === 'dorian') {
+    const chord = DORIAN_SEVENTHS[degree];
+    return [chord[1], chord[3]];
+  }
+  if (ctx.scaleId === 'mixolydian') {
+    const chord = MIXOLYDIAN_SEVENTHS[degree];
+    return [chord[1], chord[3]];
+  }
+  return null;
+}
 
 interface WeightedDegree {
   degree: number;
@@ -218,7 +278,7 @@ function buildHarmonyBlock(
       ));
 
   const melodyFloor = lowestMelodyMidi(bar);
-  const voicing = voiceAccompaniment(
+  let voicing = voiceAccompaniment(
     rootDegree,
     intervals,
     rootPc,
@@ -229,6 +289,23 @@ function buildHarmonyBlock(
     plan.mode,
     ctx,
   );
+
+  if (settings.bassDoubling && ctx.omitRootWhenBass) {
+    voicing = omitChordRoot(voicing, rootDegree, intervals, rootPc);
+    if (voicing.length < 2) {
+      voicing = voiceShell(
+        rootDegree,
+        intervals,
+        rootPc,
+        melodyFloor,
+        prevVoicing,
+        settings,
+        voicingParams,
+        ctx,
+        true,
+      );
+    }
+  }
 
   const harmonyVelocity = Math.max(
     40,
@@ -490,24 +567,82 @@ function voiceAccompaniment(
   mode: MusicPlan['mode'],
   ctx: HarmonyContext,
 ): number[] {
+  const registerParams = {
+    ...params,
+    minVoicingMidi: minVoicingMidiForDensity(ctx.voicingDensity),
+    baseOctave: ctx.voicingDensity === 'light' ? params.baseOctave + 1 : params.baseOctave,
+  };
+
   if (ctx.accompanimentStyle === 'open-fifths') {
     return voiceOpenFifths(
-      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, params,
+      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, registerParams,
+    );
+  }
+  if (ctx.accompanimentStyle === 'shell-voicing') {
+    return voiceShell(
+      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, settings, registerParams, ctx,
+      settings.bassDoubling,
     );
   }
   if (ctx.accompanimentStyle === 'quartal-stack') {
     return voiceQuartalStack(
-      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, params,
+      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, registerParams,
     );
   }
   if (settings.chordComplexity === 'sevenths' && ctx.useDiatonicSevenths) {
     return voiceSeventh(
-      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, settings, params, mode,
+      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, settings, registerParams, mode,
     );
   }
   return voiceTriad(
-    rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, settings, params,
+    rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, settings, registerParams,
   );
+}
+
+type VoicingParams = ReturnType<typeof voicingWidthParams> & {
+  minVoicingMidi?: number;
+};
+
+function voiceShell(
+  rootDegree: number,
+  intervals: number[],
+  rootPc: number,
+  melodyFloorMidi: number,
+  prevVoicing: number[] | null,
+  settings: HarmonyGenerationSettings,
+  params: VoicingParams,
+  ctx: HarmonyContext,
+  forceGuideTonesOnly = false,
+): number[] {
+  const guideOffsets = guideToneShellSemitones(rootDegree, ctx);
+  if (!guideOffsets) {
+    return voiceOpenFifths(
+      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, params,
+    );
+  }
+
+  const rootMidi = degreeToMidi(rootDegree % intervals.length, intervals, rootPc, params.baseOctave);
+  const guideNotes = guideOffsets
+    .map((offset) => rootMidi + offset)
+    .sort((a, b) => a - b);
+
+  const includeRoot = !forceGuideTonesOnly
+    && !settings.bassDoubling
+    && ctx.shellIncludeRoot;
+  const notes = includeRoot ? [rootMidi, ...guideNotes] : guideNotes;
+  const candidates = buildInversionCandidates(notes, settings.allowInversions);
+  return pickBestVoicing(candidates, melodyFloorMidi, prevVoicing, params, notes.length);
+}
+
+function omitChordRoot(
+  voicing: number[],
+  rootDegree: number,
+  intervals: number[],
+  rootPc: number,
+): number[] {
+  const rootPcTarget = (rootPc + intervals[rootDegree % intervals.length]) % 12;
+  const filtered = voicing.filter((midi) => (midi % 12) !== rootPcTarget);
+  return filtered.length > 0 ? filtered : voicing;
 }
 
 function voiceOpenFifths(
@@ -516,7 +651,7 @@ function voiceOpenFifths(
   rootPc: number,
   melodyFloorMidi: number,
   prevVoicing: number[] | null,
-  params: ReturnType<typeof voicingWidthParams>,
+  params: VoicingParams,
 ): number[] {
   const n = intervals.length;
   const root = degreeToMidi(rootDegree % n, intervals, rootPc, params.baseOctave);
@@ -531,7 +666,7 @@ function voiceQuartalStack(
   rootPc: number,
   melodyFloorMidi: number,
   prevVoicing: number[] | null,
-  params: ReturnType<typeof voicingWidthParams>,
+  params: VoicingParams,
 ): number[] {
   const n = intervals.length;
   const root = degreeToMidi(rootDegree % n, intervals, rootPc, params.baseOctave);
@@ -584,7 +719,7 @@ function voiceTriad(
   melodyFloorMidi: number,
   prevVoicing: number[] | null,
   settings: HarmonyGenerationSettings,
-  params: ReturnType<typeof voicingWidthParams>,
+  params: VoicingParams,
 ): number[] {
   const n = intervals.length;
   const baseRoot = degreeToMidi(rootDegree % n, intervals, rootPc, params.baseOctave);
@@ -604,7 +739,7 @@ function voiceSeventh(
   melodyFloorMidi: number,
   prevVoicing: number[] | null,
   settings: HarmonyGenerationSettings,
-  params: ReturnType<typeof voicingWidthParams>,
+  params: VoicingParams,
   mode: MusicPlan['mode'],
 ): number[] {
   const table = mode === 'major' ? MAJOR_DIATONIC : MINOR_DIATONIC;
@@ -637,20 +772,21 @@ function pickBestVoicing(
   candidates: number[][],
   melodyFloorMidi: number,
   prevVoicing: number[] | null,
-  params: ReturnType<typeof voicingWidthParams>,
+  params: VoicingParams,
   chordSize: number,
 ): number[] {
   const ceiling = melodyFloorMidi - params.melodyGapSemitones;
+  const minVoicingMidi = params.minVoicingMidi ?? 36;
   const maxComfortSpan = chordSize >= 4
     ? params.melodyGapSemitones + 10
-    : 24;
+    : chordSize <= 2 ? 16 : 24;
 
   let best = candidates[0];
   let bestCost = Infinity;
 
   for (const candidate of candidates) {
-    const shifted = shiftVoicingBelowCeiling(candidate, ceiling);
-    const cost = voicingCost(shifted, prevVoicing, params.spanWeight, maxComfortSpan);
+    const shifted = shiftVoicingBelowCeiling(candidate, ceiling, minVoicingMidi);
+    const cost = voicingCost(shifted, prevVoicing, params.spanWeight, maxComfortSpan, minVoicingMidi);
     if (cost < bestCost) {
       bestCost = cost;
       best = shifted;
@@ -660,7 +796,11 @@ function pickBestVoicing(
   return best.sort((a, b) => a - b);
 }
 
-function shiftVoicingBelowCeiling(voicing: number[], ceiling: number): number[] {
+function shiftVoicingBelowCeiling(
+  voicing: number[],
+  ceiling: number,
+  _minVoicingMidi = 36,
+): number[] {
   const out = [...voicing];
   while (Math.max(...out) > ceiling) {
     for (let i = 0; i < out.length; i++) {
@@ -680,11 +820,15 @@ function voicingCost(
   prevVoicing: number[] | null,
   spanWeight: number,
   maxComfortSpan = 24,
+  minVoicingMidi = 36,
 ): number {
   const span = Math.max(...voicing) - Math.min(...voicing);
+  const lowClusterPenalty = minVoicingMidi >= 52
+    ? voicing.filter((m) => m < minVoicingMidi).length * 4
+    : 0;
 
   if (!prevVoicing) {
-    let cost = span;
+    let cost = span + lowClusterPenalty;
     if (span > maxComfortSpan) cost += (span - maxComfortSpan) * 0.6;
     return cost;
   }
@@ -698,7 +842,7 @@ function voicingCost(
   }
   motion += Math.abs(sortedNext.length - sortedPrev.length) * 2;
 
-  let cost = motion + span * spanWeight;
+  let cost = motion + span * spanWeight + lowClusterPenalty;
   if (span > maxComfortSpan) cost += (span - maxComfortSpan) * 0.6;
   return cost;
 }

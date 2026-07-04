@@ -25,16 +25,16 @@ export function resolveHarmonySettingsForTexture(
     return {
       ...base,
       chordDensity: '2-per-bar',
-      chordComplexity: intent.harmonicComplexity > 0.55 ? 'sevenths' : base.chordComplexity,
-      voicingWidth: intent.harmonicComplexity > 0.7 ? 'wide' : base.voicingWidth,
+      chordComplexity: intent.harmonicComplexity > 0.65 ? 'sevenths' : base.chordComplexity,
+      voicingWidth: intent.harmonicComplexity > 0.75 ? 'wide' : base.voicingWidth,
     };
   }
   if (intent.texture === 'melody+chords') {
     return {
       ...base,
       chordDensity: '1-per-bar',
-      voicingWidth: intent.harmonicComplexity > 0.55 ? 'wide' : base.voicingWidth,
-      chordComplexity: intent.harmonicComplexity > 0.65 ? 'sevenths' : base.chordComplexity,
+      voicingWidth: intent.harmonicComplexity > 0.7 ? 'wide' : base.voicingWidth,
+      chordComplexity: intent.harmonicComplexity > 0.75 ? 'sevenths' : base.chordComplexity,
     };
   }
   return base;

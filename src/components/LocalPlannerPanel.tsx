@@ -1,4 +1,5 @@
 import type { PlannerMusicPlan, PlannerStatus } from '../types/llmMusicPlan';
+import type { PlannerDebugInfo } from '../utils/localPlanner/types';
 import type { MusicPlan } from '../types/musicPlan';
 import { isLocalPlannerEnabled } from '../planner/plannerConfig';
 import { getPlannerModelName } from '../planner/plannerClient';
@@ -17,6 +18,7 @@ interface LocalPlannerPanelProps {
   melodyIntentSummary?: string | null;
   harmonyIntentSummary?: string | null;
   phraseDevelopmentSummary?: string | null;
+  plannerDebug?: PlannerDebugInfo | null;
   seed: number;
   temperature: number;
   variation: number;
@@ -63,6 +65,7 @@ export function LocalPlannerPanel({
   melodyIntentSummary,
   harmonyIntentSummary,
   phraseDevelopmentSummary,
+  plannerDebug,
   seed,
   temperature,
   variation,
@@ -139,12 +142,16 @@ export function LocalPlannerPanel({
           </label>
           <button
             type="button"
-            className="btn btn-secondary planner-regenerate"
+            className="btn btn-tertiary planner-refresh"
             onClick={onRegenerate}
             disabled={isGenerating || promptEmpty}
+            title="Re-run prompt interpretation only — does not change your Settings. Use 'Generate MIDI' to produce the final output."
           >
-            Regenerate plan
+            {isGenerating ? <><span className="spinner" />Refreshing…</> : 'Refresh plan'}
           </button>
+          <p className="planner-refresh-hint">
+            Re-interprets the prompt · does not generate MIDI
+          </p>
         </div>
       )}
 
@@ -162,7 +169,86 @@ export function LocalPlannerPanel({
                 <dd>{warning}</dd>
               </>
             )}
+            {plannerDebug?.primaryFailureField && (
+              <>
+                <dt>Primary failure field</dt>
+                <dd><code>{plannerDebug.primaryFailureField}</code></dd>
+              </>
+            )}
+            {plannerDebug?.retryAttempted !== undefined && (
+              <>
+                <dt>Model repair retry</dt>
+                <dd>
+                  {plannerDebug.retryAttempted
+                    ? plannerDebug.retrySucceeded ? 'Succeeded' : 'Attempted, failed'
+                    : 'Not used'}
+                </dd>
+              </>
+            )}
+            {plannerDebug?.retryPromptSize !== undefined && (
+              <>
+                <dt>Retry prompt size</dt>
+                <dd>{plannerDebug.retryPromptSize} chars</dd>
+              </>
+            )}
           </dl>
+          {plannerDebug?.retryRawContent && (
+            <>
+              <p className="planner-debug-label">Model repair retry raw response</p>
+              <pre className="planner-json planner-audit">{plannerDebug.retryRawContent}</pre>
+            </>
+          )}
+          {plannerDebug?.rawContent && (
+            <>
+              <p className="planner-debug-label">Raw Ollama response (before schema parse)</p>
+              <pre className="planner-json planner-audit">{plannerDebug.rawContent}</pre>
+            </>
+          )}
+          {plannerDebug?.injectedDefaults && Object.keys(plannerDebug.injectedDefaults).length > 0 && (
+            <>
+              <p className="planner-debug-label">Injected semantic defaults</p>
+              <ul className="planner-debug-list">
+                {Object.entries(plannerDebug.injectedDefaults).map(([field, value]) => (
+                  <li key={field}>
+                    <code>{field}</code>
+                    {' → '}
+                    <code>{Array.isArray(value) ? JSON.stringify(value) : `"${value}"`}</code>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {plannerDebug?.repairActions && plannerDebug.repairActions.length > 0 && (
+            <>
+              <p className="planner-debug-label">Repair actions</p>
+              <ul className="planner-debug-list">
+                {plannerDebug.repairActions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {plannerDebug?.validationErrors && plannerDebug.validationErrors.length > 0 && (
+            <>
+              <p className="planner-debug-label">Schema validation errors</p>
+              <ul className="planner-debug-list planner-debug-errors">
+                {plannerDebug.validationErrors.map((err) => (
+                  <li key={err}><code>{err}</code></li>
+                ))}
+              </ul>
+              {plannerDebug.failedFields && plannerDebug.failedFields.length > 1 && (
+                <p className="planner-debug-hint">
+                  Failed fields (by frequency): {plannerDebug.failedFields.join(', ')}
+                </p>
+              )}
+            </>
+          )}
+          {plannerDebug?.repairedJson != null ? (
+            <>
+              <p className="planner-debug-label">Repaired JSON (pre-strict validation)</p>
+              <pre className="planner-json planner-audit">{JSON.stringify(plannerDebug.repairedJson, null, 2)}</pre>
+            </>
+          ) : null}
           <p className="planner-debug-label">PlannerMusicPlan (validated)</p>
           <pre className="planner-json">{JSON.stringify(llmPlan, null, 2)}</pre>
           {mappingAuditSummary && (

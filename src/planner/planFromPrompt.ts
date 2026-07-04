@@ -4,6 +4,7 @@
 
 import type { MusicPlan, PlanAssumption, PlanDefaults, PlanParseResult } from '../types/musicPlan';
 import type { PlannerMusicPlan } from '../utils/localPlanner/schema';
+import type { PlannerDebugInfo } from '../utils/localPlanner/types';
 import { promptToPlan } from '../utils/promptToPlan';
 import { mapToGeneratorPlan } from '../utils/localPlanner/mapToGeneratorPlan';
 import { buildMelodyIntentSummary, buildHarmonyIntentSummary, buildPhraseDevelopmentSummary, type FieldMappingNote } from '../utils/localPlanner/mappingAudit';
@@ -16,6 +17,7 @@ export interface PlanFromPromptOptions extends PlanDefaults {
   temperature?: number;
   seed?: number;
   variationBoost?: number;
+  signal?: AbortSignal;
 }
 
 export interface PlanFromPromptResult {
@@ -30,6 +32,7 @@ export interface PlanFromPromptResult {
   melodyIntentSummary?: string;
   harmonyIntentSummary?: string;
   phraseDevelopmentSummary?: string;
+  plannerDebug?: PlannerDebugInfo | null;
 }
 
 export async function planFromPromptAsync(
@@ -43,12 +46,15 @@ export async function planFromPromptAsync(
     return ruleBasedResult(trimmed, options, null);
   }
 
-  const plannerResult = await fetchMusicPlan({
-    prompt: trimmed,
-    bars: options.bars,
-    temperature: options.temperature,
-    seed: options.seed,
-  });
+  const plannerResult = await fetchMusicPlan(
+    {
+      prompt: trimmed,
+      bars: options.bars,
+      temperature: options.temperature,
+      seed: options.seed,
+    },
+    options.signal,
+  );
 
   if (plannerResult.plan) {
     return plannerBasedResult(plannerResult.plan, options, plannerResult);
@@ -97,6 +103,7 @@ function plannerBasedResult(
     melodyIntentSummary: buildMelodyIntentSummary(plannerPlan, plan),
     harmonyIntentSummary: buildHarmonyIntentSummary(plan, buildScaleContext(plan)),
     phraseDevelopmentSummary: buildPhraseDevelopmentSummary(plan),
+    plannerDebug: plannerResult.debug,
   };
 }
 

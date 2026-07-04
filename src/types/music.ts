@@ -78,6 +78,16 @@ export interface HarmonyGenerationSettings {
   cadenceStrength: HarmonyCadenceStrength;
 }
 
+/** Measured harmony voicing stats after score generation. */
+export interface HarmonyVoicingRealized {
+  style: string;
+  densityLevel: 'light' | 'medium' | 'full';
+  averageChordNoteCount: number;
+  rootOmittedWhenBass: boolean;
+  notesPerSlot: number;
+  lowRegisterNoteCount: number;
+}
+
 export interface MusicConfig {
   mode: 'prompt' | 'notes';
   promptText: string;
@@ -101,7 +111,12 @@ export interface MusicConfig {
   harmonyChordDensity: HarmonyChordDensity;
   /** Prompt-mode cadence pull (generation — affects fingerprint). */
   harmonyCadenceStrength: HarmonyCadenceStrength;
+  /** Prompt-mode melody activity (generation — melody track only). */
+  melodyDensity: MelodyDensity;
 }
+
+/** How active or sparse the generated melody is. */
+export type MelodyDensity = 'sparse' | 'normal' | 'busy';
 
 // ─── Structured parser result ──────────────────────────────────────────────
 
@@ -179,7 +194,7 @@ export type PitchRangeFilter = 'bass' | 'mid-high' | 'auto';
 
 // ─── Generation result ─────────────────────────────────────────────────────
 
-export type GenerationStatus = 'idle' | 'generating' | 'ready' | 'error';
+export type GenerationStatus = 'idle' | 'generating' | 'ready' | 'error' | 'timeout';
 
 export interface GenerationResult {
   status: GenerationStatus;
@@ -285,7 +300,7 @@ export interface ParsedScore {
   /** Melody tokens in order, flat */
   tokens: NoteToken[];
   /**
-   * Supporting harmony from the prompt pipeline: block triads, three tokens per bar
+   * Supporting harmony from the prompt pipeline: block chords per slot
    * (root, third, fifth) with bar-length duration. Omitted for note-mode scores.
    */
   harmonyTokens?: NoteToken[];
@@ -293,6 +308,10 @@ export interface ParsedScore {
   bassTokens?: NoteToken[];
   /** Generation settings used to produce harmonyTokens (prompt pipeline). */
   harmonyGeneration?: HarmonyGenerationSettings;
+  /** Notes emitted per harmony slot (varies with voicing style). */
+  harmonyNotesPerSlot?: number;
+  /** Measured voicing stats after harmony generation (prompt pipeline). */
+  harmonyVoicingRealized?: HarmonyVoicingRealized;
   bpm: number;
   beatsPerBar: number;
   beatValue: number;

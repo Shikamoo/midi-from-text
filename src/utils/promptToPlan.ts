@@ -27,6 +27,21 @@ import { mapPromptLexicon } from './promptLexicon';
 import type { ResolvedEnum } from './promptLexicon';
 import { parsePrompt } from './promptParser';
 
+/**
+ * Explicit settings values that always win over prompt-extracted values.
+ * Pass the fields the user has manually set in the Settings panel.
+ * Any field present here overrides whatever the prompt says for that dimension.
+ */
+export type PlanHardOverrides = {
+  tempo?: number;
+  key?: string;
+  mode?: 'major' | 'minor';
+  beatsPerBar?: number;
+  beatValue?: number;
+  bars?: number;
+  instrument?: number;
+};
+
 const LOOPABLE_RE = /\bloop(?:able)?\b|\brepeat(?:ing)?\b|\bhook\b/i;
 const MELODY_RE = /\bmelod|lead|tune|line\b/i;
 
@@ -42,8 +57,16 @@ const DYNAMICS: Array<[RegExp, number]> = [
  * Parse a natural-language prompt into a MusicPlan.
  * Applies defaults for any field not found in the text and records each
  * assumption so the UI can surface them.
+ *
+ * @param hardOverrides - Settings fields explicitly set by the user. These
+ *   always win over both the prompt-extracted value and defaults. Pass the
+ *   fields from the Settings panel that the user has manually changed.
  */
-export function promptToPlan(text: string, defaults: PlanDefaults = {}): PlanParseResult {
+export function promptToPlan(
+  text: string,
+  defaults: PlanDefaults = {},
+  hardOverrides: PlanHardOverrides = {},
+): PlanParseResult {
   const trimmed = text.trim();
   const extracted = parsePrompt(trimmed);
   const lexicon = mapPromptLexicon(trimmed);
@@ -91,78 +114,74 @@ export function promptToPlan(text: string, defaults: PlanDefaults = {}): PlanPar
     });
   }
 
-  // ── Numeric / structural fields from regex parser ─────────────────────────
-  const tempo = extracted.bpm
-    ? (matchCount++, assumptions.push({
-        field: 'tempo',
-        message: `tempo: ${extracted.bpm} BPM`,
-        confidence: 0.95,
-        source: 'explicit BPM',
-      }), extracted.bpm)
-    : (assumptions.push({
-        field: 'tempo',
-        message: `Default tempo: ${defaults.tempo ?? 120} BPM`,
-        confidence: 0.45,
-      }), defaults.tempo ?? 120);
+  // ── Numeric / structural fields — settings hard overrides win, then prompt, then defaults ──
 
-  const key = extracted.key
-    ? (matchCount++, assumptions.push({
-        field: 'key',
-        message: `key: ${extracted.key}`,
-        confidence: 0.95,
-        source: 'explicit key',
-      }), extracted.key)
-    : (assumptions.push({
-        field: 'key',
-        message: `Default key: ${defaults.key ?? 'C'}`,
-        confidence: 0.45,
-      }), defaults.key ?? 'C');
+  let tempo: number;
+  if (hardOverrides.tempo !== undefined) {
+    tempo = hardOverrides.tempo;
+    assumptions.push({ field: 'tempo', message: `Settings: ${tempo} BPM`, confidence: 1.0, source: 'settings override' });
+  } else if (extracted.bpm) {
+    tempo = extracted.bpm;
+    matchCount++;
+    assumptions.push({ field: 'tempo', message: `tempo: ${extracted.bpm} BPM`, confidence: 0.95, source: 'explicit BPM' });
+  } else {
+    tempo = defaults.tempo ?? 120;
+    assumptions.push({ field: 'tempo', message: `Default tempo: ${tempo} BPM`, confidence: 0.45 });
+  }
 
-  let mode: 'major' | 'minor' = extracted.musicalMode
-    ? (matchCount++, assumptions.push({
-        field: 'mode',
-        message: `mode: ${extracted.musicalMode}`,
-        confidence: 0.95,
-        source: 'explicit mode',
-      }), extracted.musicalMode)
-    : lexicon.mode
-      ? (matchCount++, assumptions.push({
-          field: 'mode',
-          message: `mode: ${lexicon.mode.value}`,
-          confidence: lexicon.mode.confidence,
-          source: lexicon.mode.sources.join(', '),
-        }), lexicon.mode.value)
-      : (assumptions.push({
-          field: 'mode',
-          message: `Default mode: ${defaults.mode ?? 'major'}`,
-          confidence: 0.45,
-        }), defaults.mode ?? 'major');
+  let key: string;
+  if (hardOverrides.key !== undefined) {
+    key = hardOverrides.key;
+    assumptions.push({ field: 'key', message: `Settings: key ${key}`, confidence: 1.0, source: 'settings override' });
+  } else if (extracted.key) {
+    key = extracted.key;
+    matchCount++;
+    assumptions.push({ field: 'key', message: `key: ${extracted.key}`, confidence: 0.95, source: 'explicit key' });
+  } else {
+    key = defaults.key ?? 'C';
+    assumptions.push({ field: 'key', message: `Default key: ${key}`, confidence: 0.45 });
+  }
 
-  const beatsPerBar = extracted.beatsPerBar
-    ? (matchCount++, assumptions.push({
-        field: 'beatsPerBar',
-        message: `meter: ${extracted.beatsPerBar}/${extracted.beatValue ?? 4}`,
-        confidence: 0.95,
-        source: 'explicit meter',
-      }), extracted.beatsPerBar)
-    : (assumptions.push({
-        field: 'beatsPerBar',
-        message: `Default meter: ${defaults.beatsPerBar ?? 4}/4`,
-        confidence: 0.45,
-      }), defaults.beatsPerBar ?? 4);
+  let mode: 'major' | 'minor';
+  if (hardOverrides.mode !== undefined) {
+    mode = hardOverrides.mode;
+    assumptions.push({ field: 'mode', message: `Settings: ${mode}`, confidence: 1.0, source: 'settings override' });
+  } else if (extracted.musicalMode) {
+    mode = extracted.musicalMode;
+    matchCount++;
+    assumptions.push({ field: 'mode', message: `mode: ${extracted.musicalMode}`, confidence: 0.95, source: 'explicit mode' });
+  } else if (lexicon.mode) {
+    mode = lexicon.mode.value;
+    matchCount++;
+    assumptions.push({ field: 'mode', message: `mode: ${lexicon.mode.value}`, confidence: lexicon.mode.confidence, source: lexicon.mode.sources.join(', ') });
+  } else {
+    mode = defaults.mode ?? 'major';
+    assumptions.push({ field: 'mode', message: `Default mode: ${mode}`, confidence: 0.45 });
+  }
 
-  const beatValue = extracted.beatValue ?? defaults.beatValue ?? 4;
+  let beatsPerBar: number;
+  if (hardOverrides.beatsPerBar !== undefined) {
+    beatsPerBar = hardOverrides.beatsPerBar;
+    assumptions.push({ field: 'beatsPerBar', message: `Settings: ${beatsPerBar}/${hardOverrides.beatValue ?? 4} time`, confidence: 1.0, source: 'settings override' });
+  } else if (extracted.beatsPerBar) {
+    beatsPerBar = extracted.beatsPerBar;
+    matchCount++;
+    assumptions.push({ field: 'beatsPerBar', message: `meter: ${extracted.beatsPerBar}/${extracted.beatValue ?? 4}`, confidence: 0.95, source: 'explicit meter' });
+  } else {
+    beatsPerBar = defaults.beatsPerBar ?? 4;
+    assumptions.push({ field: 'beatsPerBar', message: `Default meter: ${beatsPerBar}/4`, confidence: 0.45 });
+  }
+
+  const beatValue = hardOverrides.beatValue ?? extracted.beatValue ?? defaults.beatValue ?? 4;
 
   let bars: number;
-  if (extracted.bars) {
+  if (hardOverrides.bars !== undefined) {
+    bars = hardOverrides.bars;
+    assumptions.push({ field: 'bars', message: `Settings: ${bars} bars`, confidence: 1.0, source: 'settings override' });
+  } else if (extracted.bars) {
     bars = extracted.bars;
     matchCount++;
-    assumptions.push({
-      field: 'bars',
-      message: `${extracted.bars} bars`,
-      confidence: 0.95,
-      source: 'explicit bar count',
-    });
+    assumptions.push({ field: 'bars', message: `${extracted.bars} bars`, confidence: 0.95, source: 'explicit bar count' });
   } else if (LOOPABLE_RE.test(trimmed) || (lexicon.repetition?.value === 'high')) {
     bars = 4;
     matchCount++;
@@ -174,36 +193,30 @@ export function promptToPlan(text: string, defaults: PlanDefaults = {}): PlanPar
     });
   } else {
     bars = defaults.bars ?? 4;
-    assumptions.push({
-      field: 'bars',
-      message: `Default length: ${bars} bars`,
-      confidence: 0.45,
-    });
+    assumptions.push({ field: 'bars', message: `Default length: ${bars} bars`, confidence: 0.45 });
   }
 
-  if ((LOOPABLE_RE.test(trimmed) || lexicon.repetition?.value === 'high') && bars !== 4 && bars !== 8) {
+  // Only snap loopable when bars weren't set by settings override
+  if (hardOverrides.bars === undefined &&
+      (LOOPABLE_RE.test(trimmed) || lexicon.repetition?.value === 'high') &&
+      bars !== 4 && bars !== 8) {
     const snapped = bars <= 6 ? 4 : 8;
-    assumptions.push({
-      field: 'loop',
-      message: `Loopable phrase snapped to ${snapped} bars`,
-      confidence: 0.82,
-      source: 'loopable',
-    });
+    assumptions.push({ field: 'loop', message: `Loopable phrase snapped to ${snapped} bars`, confidence: 0.82, source: 'loopable' });
     bars = snapped;
   }
 
-  const instrument = extracted.instrument !== undefined
-    ? (matchCount++, assumptions.push({
-        field: 'instrument',
-        message: `instrument #${extracted.instrument}`,
-        confidence: 0.92,
-        source: 'explicit instrument',
-      }), extracted.instrument)
-    : (assumptions.push({
-        field: 'instrument',
-        message: 'Default instrument: Acoustic Grand Piano',
-        confidence: 0.45,
-      }), defaults.instrument ?? 0);
+  let instrument: number;
+  if (hardOverrides.instrument !== undefined) {
+    instrument = hardOverrides.instrument;
+    assumptions.push({ field: 'instrument', message: `Settings: instrument #${instrument}`, confidence: 1.0, source: 'settings override' });
+  } else if (extracted.instrument !== undefined) {
+    instrument = extracted.instrument;
+    matchCount++;
+    assumptions.push({ field: 'instrument', message: `instrument #${extracted.instrument}`, confidence: 0.92, source: 'explicit instrument' });
+  } else {
+    instrument = defaults.instrument ?? 0;
+    assumptions.push({ field: 'instrument', message: 'Default instrument: Acoustic Grand Piano', confidence: 0.45 });
+  }
 
   // ── Style fields from lexicon (combined, not first-match-wins) ────────────
   const mood = infer('mood', lexicon.mood, 'neutral' as Mood, 'mood');

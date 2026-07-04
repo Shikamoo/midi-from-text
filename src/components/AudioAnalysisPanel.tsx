@@ -55,9 +55,9 @@ interface Props {
 
 const SOURCE_MODE_LABELS: Record<SourceMode, string> = {
   'full-mix':   'Full mix',
-  'bass-only':  'Bass range',
-  'other-only': 'Upper range',
-  'split-both': 'Bass + Upper ranges (2-track)',
+  'bass-only':  'Bass stem only',
+  'other-only': 'Other stem only',
+  'split-both': 'Split and extract both (2-track)',
 };
 
 // ─── Component ────────────────────────────────────────────────────────────

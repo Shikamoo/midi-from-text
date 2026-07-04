@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { parsePrompt } from './utils/promptParser';
 import { useMusicGenerator } from './hooks/useMusicGenerator';
 import { useMusicInput } from './hooks/useMusicInput';
 import { useMusicXml } from './hooks/useMusicXml';
@@ -11,6 +12,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { MusicInputPreview } from './components/MusicInputPreview';
 import { PreviewPlaybackControls } from './components/PreviewPlaybackControls';
 import { HarmonyControls } from './components/HarmonyControls';
+import { MelodyControls } from './components/MelodyControls';
 import { StatusBar } from './components/StatusBar';
 import { MusicXmlUploader } from './components/MusicXmlUploader';
 import { AudioUploader } from './components/AudioUploader';
@@ -20,6 +22,7 @@ import { AudioAnalysisPanel } from './components/AudioAnalysisPanel';
 import { ScoreViewer } from './components/ScoreViewer';
 import { ScoreSummary } from './components/ScoreSummary';
 import { LocalPlannerPanel } from './components/LocalPlannerPanel';
+import { ExamplesLibrary, ExamplesMobileTrigger } from './components/ExamplesLibrary';
 import { exportMidi, defaultMidiFilename } from './utils/midiExporter';
 import { applyRepair, type RepairActionId } from './utils/repairMusicText';
 import { scoreMidiFilename } from './utils/scoreToMusicData';
@@ -38,14 +41,6 @@ import {
 
 interface Preset { label: string; text: string }
 
-const PROMPT_PRESETS: Preset[] = [
-  { label: 'Nu-Disco Loop',  text: 'loopable funky melody, 100 BPM, summer nu-disco' },
-  { label: 'Piano Arpeggio', text: '8 bars, C minor, 120 BPM, arpeggiated piano' },
-  { label: 'Jazz Bass',      text: '4 bars, F major, 90 BPM, walking bassline, acoustic bass' },
-  { label: 'Synth Melody',   text: '8 bars, D minor, 140 BPM, ascending melody, synth lead' },
-  { label: 'Soft Strings',   text: '4 bars, G major, 72 BPM, chords, soft strings, legato' },
-];
-
 const NOTES_PRESETS: Preset[] = [
   { label: 'C Major Scale',  text: 'C4 q, D4 q, E4 q, F4 q | G4 q, A4 q, B4 q, C5 q' },
   { label: 'Minor Triad',    text: 'A3 h, C4 q, E4 q | A3 h, E4 h' },
@@ -55,8 +50,8 @@ const NOTES_PRESETS: Preset[] = [
 
 const PROMPT_PLACEHOLDER =
   '8 bars, C minor, 120 BPM, arpeggiated piano\n\n' +
-  'Describe the music you want. You can mention key, tempo, bars,\n' +
-  'time signature, and instrument.';
+  'Describe the music you want — mood, style, genre, key, tempo, bars,\n' +
+  'time signature, instrument. Values in Settings always override the prompt.';
 
 const NOTES_PLACEHOLDER =
   'C4 q, E4 q, G4 h | A4 q, G4 q, E4 h\n\n' +
@@ -75,6 +70,8 @@ export default function App() {
     error,
     warnings,
     updateConfig,
+    updateSettingsConfig,
+    relinkField,
     generate,
     promptDetectionSummary,
     committedFingerprint,
@@ -89,6 +86,8 @@ export default function App() {
     plannerTemperature,
     plannerVariation,
     committedPlanOverride,
+    plannerDebug,
+    manualSettingsOverrides,
     setUseLocalPlanner,
     setPlannerControls,
   } = useMusicGenerator();
@@ -105,6 +104,8 @@ export default function App() {
   // ── Top-level mode ─────────────────────────────────────────────────────────
   const [appMode, setAppMode] = useState<AppMode>('prompt');
   const [exportError, setExportError] = useState<string | null>(null);
+  const [examplesDrawerOpen, setExamplesDrawerOpen] = useState(false);
+  const [examplesCollapsed, setExamplesCollapsed] = useState(false);
 
   // ── Space bar shortcut: play/pause in audio mode ──────────────────────────
   // A ref keeps the handler current without re-registering the listener on
@@ -205,6 +206,58 @@ export default function App() {
   const isTextMode = appMode === 'prompt' || appMode === 'notes';
   const currentText = config.mode === 'prompt' ? config.promptText : config.notesText;
 
+  // Compute three related field-sets from a single parsePrompt call to avoid redundant parsing.
+  const { autoPopulatedFields, promptParsedFields, overriddenFields } = useMemo(() => {
+    const auto = new Set<string>();
+    const parsed_set = new Set<string>();
+
+    if (config.mode === 'prompt' && config.promptText.trim()) {
+      const parsed = parsePrompt(config.promptText);
+      const pairs: Array<[keyof typeof parsed, string]> = [
+        ['bpm', 'bpm'],
+        ['key', 'key'],
+        ['musicalMode', 'musicalMode'],
+        ['beatsPerBar', 'beatsPerBar'],
+        ['beatValue', 'beatValue'],
+        ['bars', 'bars'],
+        ['instrument', 'instrument'],
+      ];
+      for (const [key, name] of pairs) {
+        if (parsed[key] !== undefined) {
+          parsed_set.add(name);
+          if (!manualSettingsOverrides[key as keyof typeof manualSettingsOverrides]) {
+            auto.add(name);
+          }
+        }
+      }
+    }
+
+    // Fields the user has manually set in the Settings panel (wins over prompt).
+    const overridden = new Set<string>();
+    for (const [k, v] of Object.entries(manualSettingsOverrides)) {
+      if (v) overridden.add(k);
+    }
+
+    return {
+      autoPopulatedFields: auto as ReadonlySet<string>,
+      promptParsedFields: parsed_set as ReadonlySet<string>,
+      overriddenFields: overridden as ReadonlySet<string>,
+    };
+  }, [config.mode, config.promptText, manualSettingsOverrides]);
+
+  // Build the settings overrides object to pass to the live preview pipeline.
+  const settingsOverrides = useMemo(() => {
+    const o: Record<string, unknown> = {};
+    if (manualSettingsOverrides.bpm) o.tempo = config.bpm;
+    if (manualSettingsOverrides.key) o.key = config.key;
+    if (manualSettingsOverrides.musicalMode) o.mode = config.musicalMode;
+    if (manualSettingsOverrides.beatsPerBar) o.beatsPerBar = config.beatsPerBar;
+    if (manualSettingsOverrides.beatValue) o.beatValue = config.beatValue;
+    if (manualSettingsOverrides.bars) o.bars = config.bars;
+    if (manualSettingsOverrides.instrument) o.instrument = config.instrument;
+    return o;
+  }, [config, manualSettingsOverrides]);
+
   const promptPlanOverride =
     config.mode === 'prompt' &&
     useLocalPlanner &&
@@ -223,7 +276,9 @@ export default function App() {
     instrument: config.instrument,
     harmonyGeneration:
       config.mode === 'prompt' ? harmonyGenerationFromConfig(config) : undefined,
+    melodyDensity: config.mode === 'prompt' ? config.melodyDensity : undefined,
     promptPlanOverride,
+    settingsOverrides: config.mode === 'prompt' ? settingsOverrides : undefined,
   });
 
   const textInputIsEmpty = isTextMode && currentText.trim().length === 0;
@@ -239,7 +294,8 @@ export default function App() {
   const scoreSummary = buildScoreSummary(musicInput.parsedScore, exportInSync);
   const isGenerating = isTextMode && status === 'generating';
   const hint = config.mode === 'prompt' ? promptDetectionSummary() : '';
-  const presets = config.mode === 'prompt' ? PROMPT_PRESETS : NOTES_PRESETS;
+  const presets = NOTES_PRESETS;
+  const showPromptExamples = appMode === 'prompt' && config.mode === 'prompt';
 
   function handlePreset(text: string) {
     updateConfig(config.mode === 'prompt' ? { promptText: text } : { notesText: text });
@@ -324,7 +380,8 @@ export default function App() {
       </header>
 
       {/* ── Main ── */}
-      <main className="app-main">
+      <main className={`app-main${showPromptExamples ? ' app-main--with-examples' : ''}`}>
+        <div className="app-workspace">
         <div className="panel">
 
           {/* Mode toggle */}
@@ -336,28 +393,44 @@ export default function App() {
           {/* ── Text mode UI (prompt / notes) ── */}
           {(appMode === 'prompt' || appMode === 'notes') && (
             <>
-              {/* Preset examples */}
-              <div className="panel-section">
-                <span className="section-label">Examples — click to load</span>
-                <div className="preset-row">
-                  {presets.map((p) => (
-                    <button
-                      key={p.label}
-                      className="preset-btn"
-                      onClick={() => handlePreset(p.text)}
-                      title={p.text}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
+              {config.mode === 'notes' && (
+                <div className="panel-section">
+                  <span className="section-label">Examples — click to load</span>
+                  <div className="preset-row">
+                    {presets.map((p) => (
+                      <button
+                        key={p.label}
+                        className="preset-btn"
+                        onClick={() => handlePreset(p.text)}
+                        title={p.text}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Text input */}
               <div className="panel-section">
-                <span className="section-label">
-                  {config.mode === 'prompt' ? 'Music Prompt' : 'Note Sequence'}
-                </span>
+                <div className="prompt-header-row">
+                  <span
+                    className="section-label"
+                    title={
+                      config.mode === 'prompt'
+                        ? 'Describe the music in plain language. Mention style, mood, genre, key, tempo — anything musical. Values set in Settings always win.'
+                        : 'Enter notes in the format: Pitch Duration, separated by commas. Bars separated by |.'
+                    }
+                  >
+                    {config.mode === 'prompt' ? 'Music Prompt' : 'Note Sequence'}
+                  </span>
+                  {showPromptExamples && (
+                    <ExamplesMobileTrigger
+                      onClick={() => setExamplesDrawerOpen(true)}
+                      expanded={examplesDrawerOpen}
+                    />
+                  )}
+                </div>
                 <textarea
                   className="music-input"
                   rows={config.mode === 'notes' ? 5 : 4}
@@ -390,6 +463,7 @@ export default function App() {
                     melodyIntentSummary={committedPlanOverride?.melodyIntentSummary ?? null}
                     harmonyIntentSummary={committedPlanOverride?.harmonyIntentSummary ?? null}
                     phraseDevelopmentSummary={committedPlanOverride?.phraseDevelopmentSummary ?? null}
+                    plannerDebug={plannerDebug}
                     seed={plannerSeed}
                     temperature={plannerTemperature}
                     variation={plannerVariation}
@@ -405,8 +479,20 @@ export default function App() {
 
               {/* Settings */}
               <div className="panel-section">
-                <span className="section-label">Settings</span>
-                <SettingsPanel config={config} onChange={updateConfig} />
+                <span
+                  className="section-label"
+                  title="Explicit overrides: any value set here wins over the same field in your prompt."
+                >
+                  Settings
+                </span>
+                <SettingsPanel
+                  config={config}
+                  onChange={updateSettingsConfig}
+                  autoPopulatedFields={autoPopulatedFields}
+                  overriddenFields={overriddenFields}
+                  promptParsedFields={promptParsedFields}
+                  onRelinkField={relinkField}
+                />
               </div>
 
               {/* Action buttons */}
@@ -415,12 +501,16 @@ export default function App() {
                   className="btn btn-primary"
                   onClick={handleGenerate}
                   disabled={isGenerating || textInputIsEmpty}
-                  title={textInputIsEmpty ? 'Enter a prompt or notes first' : undefined}
+                  title={
+                    textInputIsEmpty
+                      ? 'Enter a prompt or notes first'
+                      : 'Run the full generation pipeline and produce a MIDI-ready score'
+                  }
                 >
                   {isGenerating ? (
                     <><span className="spinner" />Generating…</>
                   ) : (
-                    'Generate'
+                    'Generate MIDI'
                   )}
                 </button>
                 <button
@@ -466,15 +556,22 @@ export default function App() {
                   disabled={!canPreviewMidi && !musicPreview.isPlaying}
                 />
                 {config.mode === 'prompt' && (
-                  <HarmonyControls
-                    config={config}
-                    chordsEnabled={harmonyPlayback.chordsEnabled}
-                    harmonyVolume={harmonyPlayback.harmonyVolume}
-                    onConfigChange={updateConfig}
-                    onChordsEnabledChange={harmonyPlayback.setChordsEnabled}
-                    onHarmonyVolumeChange={harmonyPlayback.setHarmonyVolume}
-                    disabled={!canPreviewMidi && !musicPreview.isPlaying}
-                  />
+                  <>
+                    <MelodyControls
+                      config={config}
+                      onConfigChange={updateConfig}
+                      disabled={!canPreviewMidi && !musicPreview.isPlaying}
+                    />
+                    <HarmonyControls
+                      config={config}
+                      chordsEnabled={harmonyPlayback.chordsEnabled}
+                      harmonyVolume={harmonyPlayback.harmonyVolume}
+                      onConfigChange={updateConfig}
+                      onChordsEnabledChange={harmonyPlayback.setChordsEnabled}
+                      onHarmonyVolumeChange={harmonyPlayback.setHarmonyVolume}
+                      disabled={!canPreviewMidi && !musicPreview.isPlaying}
+                    />
+                  </>
                 )}
                 {musicPreview.isPlaying && (
                   <span className="preview-playback-status" role="status">
@@ -522,6 +619,7 @@ export default function App() {
                   error={error}
                   warnings={warnings}
                   hint={hint || (musicInput.musicPlan ? `Plan: ${musicInput.issues[0]?.message.replace('Prompt interpreted as: ', '') ?? ''}` : '')}
+                  onRetry={handleGenerate}
                 />
                 {exportError && (
                   <div className="export-error">
@@ -735,7 +833,13 @@ export default function App() {
                               : 'Download single-track MIDI'
                         }
                       >
-                        ↓ {audio.sourceMode === 'split-both' ? '2-track MIDI' : 'Download MIDI'}
+                        ↓ {audio.sourceMode === 'split-both'
+                          ? '2-track MIDI (bass + upper)'
+                          : audio.sourceMode === 'bass-only'
+                            ? 'Bass-only MIDI'
+                            : audio.sourceMode === 'other-only'
+                              ? 'Upper-part MIDI'
+                              : 'Download MIDI'}
                       </button>
 
                       {/* Single-range exports — visible after split-both, disabled when empty after cleanup */}
@@ -750,7 +854,7 @@ export default function App() {
                               : 'Download bass-range MIDI'
                           }
                         >
-                          ↓ Bass range
+                          ↓ Bass-only MIDI
                         </button>
                       )}
                       {audio.sourceMode === 'split-both' && audio.notes.otherNotes !== null && (
@@ -764,7 +868,7 @@ export default function App() {
                               : 'Download upper-range MIDI'
                           }
                         >
-                          ↓ Upper range
+                          ↓ Upper-part MIDI
                         </button>
                       )}
                     </div>
@@ -869,6 +973,17 @@ export default function App() {
             )
           )}
         </div>
+        </div>
+
+        {showPromptExamples && (
+          <ExamplesLibrary
+            onSelect={handlePreset}
+            drawerOpen={examplesDrawerOpen}
+            onDrawerOpenChange={setExamplesDrawerOpen}
+            collapsed={examplesCollapsed}
+            onCollapsedChange={setExamplesCollapsed}
+          />
+        )}
       </main>
 
       <footer className="app-footer">

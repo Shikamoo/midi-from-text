@@ -26,6 +26,9 @@ export function useMusicInput(
   const bars        = options.bars        ?? 4;
   const instrument  = options.instrument  ?? 0;
   const harmonyGeneration = options.harmonyGeneration;
+  const melodyDensity = options.melodyDensity ?? 'normal';
+  // Serialize hard overrides so the memo dep is a stable primitive
+  const settingsOverridesKey = JSON.stringify(options.settingsOverrides ?? null);
 
   return useMemo(
     () =>
@@ -38,8 +41,11 @@ export function useMusicInput(
         bars,
         instrument,
         harmonyGeneration,
+        melodyDensity,
         promptPlanOverride: options.promptPlanOverride,
+        settingsOverrides: options.settingsOverrides,
       }),
-    [rawText, beatsPerBar, beatValue, bpm, key, mode, bars, instrument, harmonyGeneration, options.promptPlanOverride],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawText, beatsPerBar, beatValue, bpm, key, mode, bars, instrument, harmonyGeneration, melodyDensity, options.promptPlanOverride, settingsOverridesKey],
   );
 }

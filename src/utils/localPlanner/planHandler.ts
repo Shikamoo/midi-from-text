@@ -24,10 +24,13 @@ export async function handlePlanRequest(body: PlanApiRequest): Promise<PlanApiRe
   );
 
   if (result.ok) {
-    return { ok: true, source: 'ollama', plan: result.plan, model: config.model };
+    return { ok: true, source: 'ollama', plan: result.plan, model: config.model, debug: result.debug };
   }
 
   console.warn(`[local-planner] fallback: ${result.code} — ${result.error}`);
+  if (result.debug?.validationErrors?.length) {
+    console.warn('[local-planner] validation errors:', result.debug.validationErrors.join('; '));
+  }
   const plan = clampMusicPlan({
     ...defaultMusicPlan(prompt),
     ...(body.bars !== undefined ? { totalBars: body.bars } : {}),
@@ -38,6 +41,7 @@ export async function handlePlanRequest(body: PlanApiRequest): Promise<PlanApiRe
     plan,
     model: config.model,
     warning: userFriendlyWarning(result.code, result.error),
+    debug: result.debug,
   };
 }
 

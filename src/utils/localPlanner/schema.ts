@@ -15,6 +15,49 @@ export type PlannerRegisterBias = (typeof REGISTER_BIASES)[number];
 
 const PITCH_RE = /^[A-Ga-g](?:#|b)?-?\d$/;
 
+/** Canonical defaults injected when the LLM sends empty semantic strings. */
+export const BOUNDARY_SEMANTIC_DEFAULTS = {
+  style: 'generic',
+  scaleType: 'major',
+  motifShape: 'undulating',
+  articulation: 'legato',
+  dynamics: 'medium',
+  mood: ['neutral'],
+} as const;
+
+/** Permissive LLM boundary — accepts empty semantic strings; normalized before strict parse. */
+export const MusicPlanBoundarySchema = z.object({
+  prompt: z.string().min(1).max(2000),
+  style: z.string().max(120).optional(),
+  mood: z.array(z.string().max(40)).max(8).optional(),
+  tempoBpm: z.number().min(40).max(220).default(120),
+  meter: z.enum(METERS).default('4/4'),
+  keyCenter: z.string().min(1).max(4).default('C'),
+  scaleType: z.string().max(40).optional(),
+  phraseBars: z.number().int().min(1).max(16).default(2),
+  totalBars: z.number().int().min(1).max(64).default(4),
+  rhythmDensity: z.number().min(0).max(1).default(0.5),
+  restDensity: z.number().min(0).max(1).default(0.2),
+  syncopation: z.number().min(0).max(1).default(0.35),
+  harmonicComplexity: z.number().min(0).max(1).default(0.45),
+  repetition: z.number().min(0).max(1).default(0.55),
+  variation: z.number().min(0).max(1).default(0.45),
+  consonance: z.number().min(0).max(1).default(0.7),
+  melodicRange: z.object({
+    min: z.string().regex(PITCH_RE, 'Expected pitch like C4'),
+    max: z.string().regex(PITCH_RE, 'Expected pitch like C5'),
+  }).default({ min: 'C4', max: 'C6' }),
+  leapRate: z.number().min(0).max(1).default(0.35),
+  motifShape: z.string().max(80).optional(),
+  articulation: z.string().max(40).optional(),
+  dynamics: z.string().max(40).optional(),
+  texture: z.enum(TEXTURES).default('melody+chords'),
+  registerBias: z.enum(REGISTER_BIASES).default('mid'),
+  percussionEnergy: z.number().min(0).max(1).default(0.4),
+  notes: z.array(z.string().max(40)).max(64).default([]),
+});
+
+/** Strict internal schema — app types after boundary normalization. */
 export const MusicPlanSchema = z.object({
   prompt: z.string().min(1).max(2000),
   style: z.string().min(1).max(120).default('generic'),
@@ -77,11 +120,6 @@ function normalizePitch(pitch: string, fallback: string): string {
   return `${m[1].toUpperCase()}${m[2]}${m[3]}`;
 }
 
-const NUMERIC_01 = [
-  'rhythmDensity', 'restDensity', 'syncopation', 'harmonicComplexity',
-  'repetition', 'variation', 'consonance', 'leapRate', 'percussionEnergy',
-] as const;
-
 /** Safe defaults for a new planner plan. */
 export function defaultMusicPlan(prompt = ''): PlannerMusicPlan {
   return clampMusicPlan(
@@ -91,17 +129,17 @@ export function defaultMusicPlan(prompt = ''): PlannerMusicPlan {
 }
 
 /** Coerce enums and shapes before validation. */
-export function normalizeMusicPlan(raw: unknown, promptFallback = ''): PlannerMusicPlan {
-  const prepped = prepRaw(raw, promptFallback);
-  const parsed = MusicPlanSchema.safeParse(prepped);
-  if (parsed.success) {
-    return clampMusicPlan(parsed.data, promptFallback);
-  }
-  return clampMusicPlan(
-    MusicPlanSchema.parse({ ...defaultMusicPlan(promptFallback), ...(prepped as object) }),
-    promptFallback,
-  );
-}
+export {
+  normalizeMusicPlan,
+  tryNormalizeMusicPlan,
+  extractJsonFromString,
+  formatZodValidationErrors,
+  repairMusicPlanRaw,
+  normalizeBoundarySemantics,
+  SCHEMA_FIELD_KEYS,
+  type PlannerParseDebug,
+  type PlannerParseResult,
+} from './schemaDebug.js';
 
 /** Clamp numeric fields and enforce cross-field bounds. */
 export function clampMusicPlan(
@@ -145,30 +183,6 @@ export function clampMusicPlan(
     registerBias,
     notes: Array.isArray(plan.notes) ? plan.notes : [],
   };
-}
-
-function prepRaw(raw: unknown, promptFallback: string): unknown {
-  if (typeof raw !== 'object' || raw === null) {
-    return { prompt: promptFallback || 'untitled' };
-  }
-  const obj = { ...(raw as Record<string, unknown>) };
-  if (!obj.prompt && promptFallback) obj.prompt = promptFallback;
-  if (typeof obj.mood === 'string') obj.mood = [obj.mood];
-  if (Array.isArray(obj.mood)) {
-    obj.mood = obj.mood.filter((m) => typeof m === 'string' && m.trim().length > 0);
-  }
-  for (const field of NUMERIC_01) {
-    if (obj[field] !== undefined) obj[field] = clampNumber(obj[field], 0, 1);
-  }
-  if (obj.tempoBpm !== undefined) obj.tempoBpm = clampNumber(obj.tempoBpm, 40, 220);
-  if (obj.phraseBars !== undefined) obj.phraseBars = clampInt(obj.phraseBars, 1, 16);
-  if (obj.totalBars !== undefined) obj.totalBars = clampInt(obj.totalBars, 1, 64);
-  if (typeof obj.keyCenter === 'string') obj.keyCenter = normalizeKey(obj.keyCenter);
-  if (!METERS.includes(obj.meter as PlannerMeter)) obj.meter = '4/4';
-  if (!TEXTURES.includes(obj.texture as PlannerTexture)) obj.texture = 'melody+chords';
-  if (!REGISTER_BIASES.includes(obj.registerBias as PlannerRegisterBias)) obj.registerBias = 'mid';
-  if (!Array.isArray(obj.notes)) obj.notes = [];
-  return obj;
 }
 
 /** JSON Schema for Ollama `format` field. */

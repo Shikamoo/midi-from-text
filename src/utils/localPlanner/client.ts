@@ -3,7 +3,7 @@
  */
 
 import type { PlannerMusicPlan } from './schema';
-import type { PlanApiRequest, PlanApiResponse, PlannerStatus } from './types';
+import type { PlanApiRequest, PlanApiResponse, PlannerStatus, PlannerDebugInfo } from './types';
 import { isLocalPlannerEnabled } from './config';
 import { checkOllamaAvailable, resolveOllamaConfig } from './ollamaClient';
 
@@ -14,18 +14,23 @@ export interface PlannerClientResult {
   model: string | null;
   error: string | null;
   warning: string | null;
+  debug: PlannerDebugInfo | null;
 }
 
 export function getPlannerModelName(): string {
   return resolveOllamaConfig().model;
 }
 
-export async function fetchMusicPlan(request: PlanApiRequest): Promise<PlannerClientResult> {
+export async function fetchMusicPlan(
+  request: PlanApiRequest,
+  signal?: AbortSignal,
+): Promise<PlannerClientResult> {
   try {
     const res = await fetch('/api/plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
+      signal,
     });
 
     const data = await res.json() as PlanApiResponse;
@@ -38,6 +43,7 @@ export async function fetchMusicPlan(request: PlanApiRequest): Promise<PlannerCl
         model: null,
         error: data.error,
         warning: null,
+        debug: null,
       };
     }
 
@@ -48,6 +54,7 @@ export async function fetchMusicPlan(request: PlanApiRequest): Promise<PlannerCl
       model: data.model ?? getPlannerModelName(),
       error: null,
       warning: data.warning ?? null,
+      debug: data.debug ?? null,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Planner request failed';
@@ -58,6 +65,7 @@ export async function fetchMusicPlan(request: PlanApiRequest): Promise<PlannerCl
       model: null,
       error: message,
       warning: null,
+      debug: null,
     };
   }
 }

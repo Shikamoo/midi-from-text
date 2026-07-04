@@ -14,6 +14,9 @@ import {
   resolvePitchAnchorDegrees,
 } from './melodyIntent';
 import {
+  resolveMelodyDensityParams,
+} from '../melodySettings';
+import {
   developPhraseBar,
   phraseWindowSize,
   resolvePhraseStrategy,
@@ -93,6 +96,11 @@ export function buildRhythmPattern(
   preset: StylePreset,
   barOffset: number,
 ): RhythmSlot[] {
+  const densityParams = resolveMelodyDensityParams(plan);
+  if (densityParams) {
+    return buildRhythmForDensity(plan, preset, barOffset, densityParams);
+  }
+
   const intent = plan.plannerIntent;
   if (intent) {
     const activity = intent.rhythmDensity * (1 - intent.restDensity * 0.5);
@@ -147,6 +155,62 @@ export function buildRhythmPattern(
   }
 
   return base;
+}
+
+function buildRhythmForDensity(
+  plan: MusicPlan,
+  preset: StylePreset,
+  barOffset: number,
+  densityParams: NonNullable<ReturnType<typeof resolveMelodyDensityParams>>,
+): RhythmSlot[] {
+  const activity = densityParams.rhythmDensity * (1 - densityParams.restDensity * 0.5);
+  if (activity < 0.35) {
+    return sparseRhythm(plan.beatsPerBar);
+  }
+  if (activity > 0.65) {
+    let slots = denseRhythm(plan.beatsPerBar);
+    if (densityParams.shortenDurations) {
+      slots = shortenRhythmSlots(slots);
+    }
+    return slots;
+  }
+
+  const patterns = preset.rhythmPatterns;
+  let base = patterns[barOffset % patterns.length].map((slot) => ({ ...slot }));
+  if (densityParams.shortenDurations) {
+    base = shortenRhythmSlots(base);
+  }
+  const syncBias = plan.plannerIntent?.syncopationLevel ?? preset.syncopationBias;
+  if (syncBias > 0.55 || plan.groove > 0.58) {
+    base = applySyncopation(base, syncBias, barOffset);
+  }
+  if (densityParams.weakBeatExtraNotes) {
+    base = addWeakBeatFillers(base);
+  }
+  return base;
+}
+
+function shortenRhythmSlots(slots: RhythmSlot[]): RhythmSlot[] {
+  const out: RhythmSlot[] = [];
+  for (const slot of slots) {
+    if (slot.rest || slot.duration <= 0.5) {
+      out.push({ ...slot });
+      continue;
+    }
+    const half = slot.duration / 2;
+    out.push({ ...slot, duration: half, accent: slot.accent });
+    out.push({ duration: half });
+  }
+  return out;
+}
+
+function addWeakBeatFillers(slots: RhythmSlot[]): RhythmSlot[] {
+  return slots.map((slot, i) => {
+    if (slot.rest && i % 2 === 1) {
+      return { duration: slot.duration };
+    }
+    return slot;
+  });
 }
 
 function sparseRhythm(beatsPerBar: number): RhythmSlot[] {
@@ -205,6 +269,9 @@ export function chooseNextDegree(
 ): number {
   const chordToneBias = effectiveChordToneBias(plan);
   const leapRate = effectiveLeapRate(plan);
+  const densityParams = resolveMelodyDensityParams(plan);
+  const passingThreshold = densityParams?.passingToneThreshold ?? 0.7;
+  const passingMinLeap = densityParams?.passingToneMinLeap ?? 2;
   const maxDegree = scale.maxDegree ?? 6;
   const hook = preset.hookDegrees[hookIndex % preset.hookDegrees.length];
   const arcTarget = phraseArcDegree(barIndex, totalBars, plan, preset);
@@ -263,8 +330,11 @@ export function chooseNextDegree(
   } else if (leapRate > 0.72 && Math.abs(toTarget) >= 2 && accent && !nearPhraseEnd) {
     next = prevDegree + (toTarget > 0 ? 2 : -2);
   } else if (toTarget === 0 && pitchedIndex > 0) {
-    next = prevDegree + neighborOffset(pitchedIndex, barIndex, leapRate);
-  } else if (weakBeat && Math.abs(toTarget) >= 2 && chordToneBias < 0.7) {
+    const allowNeighbor = densityParams?.neighborOnWeakBeats ?? true;
+    if (allowNeighbor || !weakBeat) {
+      next = prevDegree + neighborOffset(pitchedIndex, barIndex, leapRate);
+    }
+  } else if (weakBeat && Math.abs(toTarget) >= passingMinLeap && chordToneBias < passingThreshold) {
     next = passingToneBetween(prevDegree, target, maxDegree);
   } else if (leapRate < 0.32 && Math.abs(toTarget) > 1) {
     next = prevDegree + stepDir;

@@ -36,3 +36,8 @@ function readEnv(): Record<string, string | undefined> {
 /** Low default — structured JSON schema handles shape; 0 maximizes adherence. */
 export const DEFAULT_PLANNER_TEMPERATURE = 0;
 export const DEFAULT_PLANNER_SEED = 42;
+
+export function isPlannerDebugEnabled(env: Record<string, string | undefined> = readEnv()): boolean {
+  const flag = env.VITE_PLANNER_DEBUG ?? env.PLANNER_DEBUG ?? 'false';
+  return flag === 'true' || flag === '1';
+}

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   MusicPlanSchema,
+  MusicPlanBoundarySchema,
   normalizeMusicPlan,
   clampMusicPlan,
   defaultMusicPlan,
+  BOUNDARY_SEMANTIC_DEFAULTS,
 } from './schema';
 import { mapToGeneratorPlan } from './mapToGeneratorPlan';
 import { fallbackMusicPlan } from './fallbackPlan';
@@ -12,6 +14,17 @@ import { MOCK_PLANNER_PLAN_RAW } from './__fixtures__/mockPlannerPlan';
 describe('MusicPlanSchema', () => {
   it('validates a complete mock planner response', () => {
     expect(MusicPlanSchema.safeParse(MOCK_PLANNER_PLAN_RAW).success).toBe(true);
+  });
+
+  it('boundary schema accepts empty style that strict schema rejects', () => {
+    const payload = { ...MOCK_PLANNER_PLAN_RAW, style: '' };
+    expect(MusicPlanBoundarySchema.safeParse(payload).success).toBe(true);
+    expect(MusicPlanSchema.safeParse(payload).success).toBe(false);
+  });
+
+  it('normalizes empty style to generic via boundary pipeline', () => {
+    const plan = normalizeMusicPlan({ ...MOCK_PLANNER_PLAN_RAW, style: '' }, 'test');
+    expect(plan.style).toBe(BOUNDARY_SEMANTIC_DEFAULTS.style);
   });
 
   it('clamps tempoBpm to 40..220', () => {
