@@ -13,6 +13,11 @@ import {
   effectiveLeapRate,
   resolvePitchAnchorDegrees,
 } from './melodyIntent';
+import {
+  developPhraseBar,
+  phraseWindowSize,
+  resolvePhraseStrategy,
+} from './phraseDevelopment';
 import type {
   MotifBar,
   RhythmSlot,
@@ -588,26 +593,47 @@ export function tilePhrase(
   preset: StylePreset,
 ): MotifBar[] {
   const phraseShape = resolvePhraseShape(plan, preset);
+  const usePhraseDevelopment = Boolean(plan.plannerIntent);
+  const phraseWindow = phraseWindowSize(plan);
   const result: MotifBar[] = [];
 
   for (let barIndex = 0; barIndex < plan.bars; barIndex++) {
     const motifIndex = barIndex % seedMotif.length;
-    const cycle = Math.floor(barIndex / seedMotif.length);
+    const cycle = Math.floor(barIndex / phraseWindow);
     const seedBar = seedMotif[motifIndex];
 
-    let bar =
-      cycle === 0 && barIndex < seedMotif.length
-        ? seedBar
-        : varyMotif(seedBar, {
-            plan,
-            preset,
-            phraseShape,
-            barIndex,
-            cycle,
-            motifIndex,
-            totalBars: plan.bars,
-            scaleNotes: scale.notes,
-          });
+    let bar: MotifBar;
+    if (usePhraseDevelopment) {
+      const strategy = resolvePhraseStrategy(plan, barIndex, cycle, motifIndex);
+      bar = developPhraseBar(seedBar, {
+        plan,
+        preset,
+        phraseShape,
+        barIndex,
+        cycle,
+        motifIndex,
+        totalBars: plan.bars,
+        scaleNotes: scale.notes,
+        phraseWindow,
+        strategy,
+        maxDegree: scale.maxDegree,
+      });
+    } else {
+      const legacyCycle = Math.floor(barIndex / seedMotif.length);
+      bar =
+        legacyCycle === 0 && barIndex < seedMotif.length
+          ? seedBar
+          : varyMotif(seedBar, {
+              plan,
+              preset,
+              phraseShape,
+              barIndex,
+              cycle: legacyCycle,
+              motifIndex,
+              totalBars: plan.bars,
+              scaleNotes: scale.notes,
+            });
+    }
 
     const isPenultimate = plan.bars >= 4 && barIndex === plan.bars - 2;
     if (isPenultimate) {

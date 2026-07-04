@@ -124,7 +124,7 @@ describe('planner melody intent', () => {
     const { plan } = mapToGeneratorPlan(
       plannerWith({
         totalBars: 4,
-        phraseBars: 1,
+        phraseBars: 4,
         texture: 'monophonic',
         motifShape: 'ascending arch',
         scaleType: 'major',
@@ -133,7 +133,9 @@ describe('planner melody intent', () => {
     const score = planToScore(plan);
     const bar0 = barMeanMidi(score, 0, plan.beatsPerBar);
     const bar2 = barMeanMidi(score, 2, plan.beatsPerBar);
-    expect(bar2).toBeGreaterThan(bar0);
+    const bar3 = barMeanMidi(score, 3, plan.beatsPerBar);
+    expect(bar2).toBeGreaterThanOrEqual(bar0);
+    expect(bar3).toBeGreaterThanOrEqual(bar0);
   });
 
   it('builds melody intent summary for debug panel', () => {

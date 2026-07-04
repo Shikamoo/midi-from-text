@@ -184,6 +184,7 @@ export function useMusicGenerator() {
             : undefined,
           melodyIntentSummary: planResult.melodyIntentSummary,
           harmonyIntentSummary: planResult.harmonyIntentSummary,
+          phraseDevelopmentSummary: planResult.phraseDevelopmentSummary,
         };
       }
 
