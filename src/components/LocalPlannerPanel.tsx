@@ -15,6 +15,7 @@ interface LocalPlannerPanelProps {
   generatorPlan: MusicPlan | null;
   mappingAuditSummary?: string | null;
   melodyIntentSummary?: string | null;
+  harmonyIntentSummary?: string | null;
   seed: number;
   temperature: number;
   variation: number;
@@ -59,6 +60,7 @@ export function LocalPlannerPanel({
   generatorPlan,
   mappingAuditSummary,
   melodyIntentSummary,
+  harmonyIntentSummary,
   seed,
   temperature,
   variation,
@@ -171,6 +173,12 @@ export function LocalPlannerPanel({
             <>
               <p className="planner-debug-label">Melody intent realized</p>
               <pre className="planner-json planner-audit">{melodyIntentSummary}</pre>
+            </>
+          )}
+          {harmonyIntentSummary && (
+            <>
+              <p className="planner-debug-label">Harmony intent realized</p>
+              <pre className="planner-json planner-audit">{harmonyIntentSummary}</pre>
             </>
           )}
           {generatorPlan && (

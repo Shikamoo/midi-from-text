@@ -18,7 +18,9 @@ export function resolveHarmonySettingsForTexture(
   plan: MusicPlan,
   base: HarmonyGenerationSettings,
 ): HarmonyGenerationSettings {
-  const intent = resolvePlannerIntent(plan);
+  if (!plan.plannerIntent) return base;
+
+  const intent = plan.plannerIntent;
   if (intent.texture === 'polyphonic') {
     return {
       ...base,
@@ -27,19 +29,26 @@ export function resolveHarmonySettingsForTexture(
       voicingWidth: intent.harmonicComplexity > 0.7 ? 'wide' : base.voicingWidth,
     };
   }
-  if (intent.texture === 'melody+chords' && intent.harmonicComplexity > 0.65) {
-    return { ...base, chordComplexity: 'sevenths' };
+  if (intent.texture === 'melody+chords') {
+    return {
+      ...base,
+      chordDensity: '1-per-bar',
+      voicingWidth: intent.harmonicComplexity > 0.55 ? 'wide' : base.voicingWidth,
+      chordComplexity: intent.harmonicComplexity > 0.65 ? 'sevenths' : base.chordComplexity,
+    };
   }
   return base;
 }
 
 export function shouldGenerateHarmony(plan: MusicPlan): boolean {
-  const texture = resolvePlannerIntent(plan).texture;
+  if (!plan.plannerIntent) return true;
+  const texture = plan.plannerIntent.texture;
   return texture === 'melody+chords' || texture === 'polyphonic';
 }
 
 export function shouldGenerateBass(plan: MusicPlan): boolean {
-  return resolvePlannerIntent(plan).texture === 'melody+bass';
+  if (!plan.plannerIntent) return false;
+  return plan.plannerIntent.texture === 'melody+bass';
 }
 
 /** Simple diatonic bass: root per bar (or two roots when syncopation is high). */

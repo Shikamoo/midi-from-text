@@ -18,10 +18,12 @@ import {
   effectiveHarmonyCadence,
   voicingWidthParams,
 } from '../harmonySettings';
+import {
+  penultimateHarmonyDegree,
+  resolveHarmonyContext,
+  type HarmonyContext,
+} from './harmonyIntent';
 import type { ScaleContext, StylePreset } from './types';
-
-const MAJOR_INTERVALS = [0, 2, 4, 5, 7, 9, 11];
-const MINOR_INTERVALS = [0, 2, 3, 5, 7, 8, 10];
 
 /** GM program for the harmony track when exporting prompt-generated scores. */
 export const HARMONY_INSTRUMENT = 48; // String Ensemble
@@ -63,7 +65,8 @@ export function deriveHarmony(
   const totalBars = melodyScore.bars.length;
   if (totalBars === 0) return [];
 
-  const intervals = plan.mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
+  const harmonyCtx = resolveHarmonyContext(plan, scale);
+  const intervals = harmonyCtx.intervals;
   const rootPc = ((scale.rootMidi % 12) + 12) % 12;
   const voicingParams = voicingWidthParams(settings.voicingWidth);
   const harmonyCadence = effectiveHarmonyCadence(plan.cadenceStrength, settings);
@@ -94,6 +97,8 @@ export function deriveHarmony(
         settings,
         voicingParams,
         harmonyCadence,
+        undefined,
+        harmonyCtx,
       );
       tokens.push(...block.tokens);
       prevVoicing = block.voicing;
@@ -118,6 +123,7 @@ export function deriveHarmony(
       isPenultimate,
       settings.chordComplexity,
       harmonyCadence,
+      harmonyCtx,
     );
 
     const firstBlock = buildHarmonyBlock(
@@ -137,6 +143,7 @@ export function deriveHarmony(
       voicingParams,
       harmonyCadence,
       firstRoot,
+      harmonyCtx,
     );
     tokens.push(...firstBlock.tokens);
 
@@ -157,6 +164,7 @@ export function deriveHarmony(
       voicingParams,
       harmonyCadence,
       secondRoot,
+      harmonyCtx,
     );
     tokens.push(...secondBlock.tokens);
 
@@ -190,7 +198,9 @@ function buildHarmonyBlock(
   voicingParams: ReturnType<typeof voicingWidthParams>,
   harmonyCadence: number,
   forcedRoot?: number,
+  harmonyCtx?: HarmonyContext,
 ): HarmonyBlockResult {
+  const ctx = harmonyCtx ?? resolveHarmonyContext(plan, { notes: [], rootMidi: rootPc + 60 });
   const rootDegree = forcedRoot ?? (isFinalBar
     ? 0
     : chooseChordRoot(
@@ -204,10 +214,11 @@ function buildHarmonyBlock(
         isPenultimate,
         settings.chordComplexity,
         harmonyCadence,
+        ctx,
       ));
 
   const melodyFloor = lowestMelodyMidi(bar);
-  const voicing = voiceChord(
+  const voicing = voiceAccompaniment(
     rootDegree,
     intervals,
     rootPc,
@@ -216,6 +227,7 @@ function buildHarmonyBlock(
     settings,
     voicingParams,
     plan.mode,
+    ctx,
   );
 
   const harmonyVelocity = Math.max(
@@ -257,6 +269,7 @@ function resolveTwoChordRoots(
   isPenultimate: boolean,
   chordComplexity: HarmonyChordComplexity,
   harmonyCadence: number,
+  harmonyCtx: HarmonyContext,
 ): [number, number] {
   if (isFinalBar) return [0, 0];
 
@@ -271,6 +284,7 @@ function resolveTwoChordRoots(
     false,
     chordComplexity,
     harmonyCadence,
+    harmonyCtx,
   );
 
   const secondCandidate = chooseChordRoot(
@@ -284,6 +298,7 @@ function resolveTwoChordRoots(
     isPenultimate,
     chordComplexity,
     harmonyCadence,
+    harmonyCtx,
   );
 
   if (secondCandidate === firstRoot) {
@@ -292,12 +307,13 @@ function resolveTwoChordRoots(
 
   const barDegrees = collectStrongMelodyDegrees(bar, rootPc, intervals);
   const secondDegrees = collectStrongMelodyDegrees(secondHalf, rootPc, intervals);
-  const firstOnBar = scoreChordAgainstMelody(firstRoot, barDegrees, chordComplexity);
-  const firstOnSecond = scoreChordAgainstMelody(firstRoot, secondDegrees, chordComplexity);
+  const firstOnBar = scoreChordAgainstMelody(firstRoot, barDegrees, chordComplexity, harmonyCtx.degreeCount);
+  const firstOnSecond = scoreChordAgainstMelody(firstRoot, secondDegrees, chordComplexity, harmonyCtx.degreeCount);
   const candidateOnSecond = scoreChordAgainstMelody(
     secondCandidate,
     secondDegrees,
     chordComplexity,
+    harmonyCtx.degreeCount,
   );
   const changeMargin = 1.75 + harmonyCadence * 0.75;
 
@@ -351,7 +367,9 @@ function chooseChordRoot(
   isPenultimate: boolean,
   chordComplexity: HarmonyChordComplexity,
   harmonyCadence: number,
+  harmonyCtx?: HarmonyContext,
 ): number {
+  const degreeCount = harmonyCtx?.degreeCount ?? 7;
   const strongDegrees = collectStrongMelodyDegrees(bar, rootPc, intervals);
   const styleHint = preset.turnaroundDegrees[barIndex % preset.turnaroundDegrees.length];
   const cadenceBoost = harmonyCadence * 2.5;
@@ -359,22 +377,24 @@ function chooseChordRoot(
   let bestDegree = 0;
   let bestScore = -Infinity;
 
-  for (let degree = 0; degree < 7; degree++) {
-    let score = scoreChordAgainstMelody(degree, strongDegrees, chordComplexity);
+  for (let degree = 0; degree < degreeCount; degree++) {
+    let score = scoreChordAgainstMelody(degree, strongDegrees, chordComplexity, degreeCount);
 
-    if (degree === styleHint) {
+    if (degree === styleHint % degreeCount) {
       score += 1.2 + plan.chordToneBias * 0.8;
     }
 
     if (isPenultimate) {
-      const penultimateTarget = plan.mode === 'major' ? 4 : 6;
+      const penultimateTarget = harmonyCtx
+        ? penultimateHarmonyDegree(harmonyCtx, plan)
+        : (plan.mode === 'major' ? 4 : 6);
       if (degree === penultimateTarget) score += cadenceBoost;
-      if (degree === 4) score += cadenceBoost * 0.35;
+      if (degree === 4 % degreeCount) score += cadenceBoost * 0.35;
     }
 
     const rootMotion = Math.min(
       Math.abs(degree - prevRootDegree),
-      7 - Math.abs(degree - prevRootDegree),
+      degreeCount - Math.abs(degree - prevRootDegree),
     );
     score -= rootMotion * 0.25;
 
@@ -428,8 +448,9 @@ function scoreChordAgainstMelody(
   rootDegree: number,
   strongDegrees: WeightedDegree[],
   chordComplexity: HarmonyChordComplexity,
+  degreeCount = 7,
 ): number {
-  const chordTones = chordToneDegrees(rootDegree, chordComplexity);
+  const chordTones = chordToneDegrees(rootDegree, chordComplexity, degreeCount);
   let score = 0;
 
   for (const { degree, weight } of strongDegrees) {
@@ -444,14 +465,81 @@ function scoreChordAgainstMelody(
 function chordToneDegrees(
   rootDegree: number,
   chordComplexity: HarmonyChordComplexity,
+  degreeCount = 7,
 ): number[] {
+  const n = degreeCount;
+  const thirdOffset = Math.min(2, n - 1);
+  const fifthOffset = Math.min(4, n - 1);
   const triad = [
-    rootDegree,
-    (rootDegree + 2) % 7,
-    (rootDegree + 4) % 7,
+    rootDegree % n,
+    (rootDegree + thirdOffset) % n,
+    (rootDegree + fifthOffset) % n,
   ];
   if (chordComplexity === 'triads') return triad;
-  return [...triad, (rootDegree + 6) % 7];
+  return [...triad, (rootDegree + Math.min(6, n - 1)) % n];
+}
+
+function voiceAccompaniment(
+  rootDegree: number,
+  intervals: number[],
+  rootPc: number,
+  melodyFloorMidi: number,
+  prevVoicing: number[] | null,
+  settings: HarmonyGenerationSettings,
+  params: ReturnType<typeof voicingWidthParams>,
+  mode: MusicPlan['mode'],
+  ctx: HarmonyContext,
+): number[] {
+  if (ctx.accompanimentStyle === 'open-fifths') {
+    return voiceOpenFifths(
+      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, params,
+    );
+  }
+  if (ctx.accompanimentStyle === 'quartal-stack') {
+    return voiceQuartalStack(
+      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, params,
+    );
+  }
+  if (settings.chordComplexity === 'sevenths' && ctx.useDiatonicSevenths) {
+    return voiceSeventh(
+      rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, settings, params, mode,
+    );
+  }
+  return voiceTriad(
+    rootDegree, intervals, rootPc, melodyFloorMidi, prevVoicing, settings, params,
+  );
+}
+
+function voiceOpenFifths(
+  rootDegree: number,
+  intervals: number[],
+  rootPc: number,
+  melodyFloorMidi: number,
+  prevVoicing: number[] | null,
+  params: ReturnType<typeof voicingWidthParams>,
+): number[] {
+  const n = intervals.length;
+  const root = degreeToMidi(rootDegree % n, intervals, rootPc, params.baseOctave);
+  const fifthDegree = (rootDegree + Math.max(2, Math.floor(n / 2))) % n;
+  const fifth = degreeToMidi(fifthDegree, intervals, rootPc, params.baseOctave);
+  return pickBestVoicing([[root, fifth]], melodyFloorMidi, prevVoicing, params, 2);
+}
+
+function voiceQuartalStack(
+  rootDegree: number,
+  intervals: number[],
+  rootPc: number,
+  melodyFloorMidi: number,
+  prevVoicing: number[] | null,
+  params: ReturnType<typeof voicingWidthParams>,
+): number[] {
+  const n = intervals.length;
+  const root = degreeToMidi(rootDegree % n, intervals, rootPc, params.baseOctave);
+  const fourth = degreeToMidi((rootDegree + 1) % n, intervals, rootPc, params.baseOctave);
+  const fifthDegree = (rootDegree + Math.max(2, Math.floor(n / 2))) % n;
+  const fifth = degreeToMidi(fifthDegree, intervals, rootPc, params.baseOctave);
+  const notes = [root, fourth, fifth].sort((a, b) => a - b);
+  return pickBestVoicing([notes], melodyFloorMidi, prevVoicing, params, notes.length);
 }
 
 function midiToScaleDegree(
@@ -489,40 +577,6 @@ function lowestMelodyMidi(bar: Bar): number {
   return min === 127 ? 72 : min;
 }
 
-function voiceChord(
-  rootDegree: number,
-  intervals: number[],
-  rootPc: number,
-  melodyFloorMidi: number,
-  prevVoicing: number[] | null,
-  settings: HarmonyGenerationSettings,
-  params: ReturnType<typeof voicingWidthParams>,
-  mode: MusicPlan['mode'],
-): number[] {
-  if (settings.chordComplexity === 'triads') {
-    return voiceTriad(
-      rootDegree,
-      intervals,
-      rootPc,
-      melodyFloorMidi,
-      prevVoicing,
-      settings,
-      params,
-    );
-  }
-
-  return voiceSeventh(
-    rootDegree,
-    intervals,
-    rootPc,
-    melodyFloorMidi,
-    prevVoicing,
-    settings,
-    params,
-    mode,
-  );
-}
-
 function voiceTriad(
   rootDegree: number,
   intervals: number[],
@@ -532,9 +586,10 @@ function voiceTriad(
   settings: HarmonyGenerationSettings,
   params: ReturnType<typeof voicingWidthParams>,
 ): number[] {
-  const baseRoot = degreeToMidi(rootDegree, intervals, rootPc, params.baseOctave);
-  const third = degreeToMidi((rootDegree + 2) % 7, intervals, rootPc, params.baseOctave);
-  const fifth = degreeToMidi((rootDegree + 4) % 7, intervals, rootPc, params.baseOctave);
+  const n = intervals.length;
+  const baseRoot = degreeToMidi(rootDegree % n, intervals, rootPc, params.baseOctave);
+  const third = degreeToMidi((rootDegree + 2) % n, intervals, rootPc, params.baseOctave);
+  const fifth = degreeToMidi((rootDegree + Math.min(4, n - 1)) % n, intervals, rootPc, params.baseOctave);
 
   const rootPosition = [baseRoot, third, fifth];
   const candidates = buildInversionCandidates(rootPosition, settings.allowInversions);

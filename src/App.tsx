@@ -388,6 +388,7 @@ export default function App() {
                     generatorPlan={committedPlanOverride?.plan ?? null}
                     mappingAuditSummary={committedPlanOverride?.mappingAuditSummary ?? null}
                     melodyIntentSummary={committedPlanOverride?.melodyIntentSummary ?? null}
+                    harmonyIntentSummary={committedPlanOverride?.harmonyIntentSummary ?? null}
                     seed={plannerSeed}
                     temperature={plannerTemperature}
                     variation={plannerVariation}

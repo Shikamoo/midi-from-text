@@ -154,6 +154,7 @@ export function summarizePlannerMapping(
 }
 
 export { buildMelodyIntentSummary } from '../score/melodyIntent';
+export { buildHarmonyIntentSummary } from '../score/harmonyIntent';
 
 /** Default intent synthesized from legacy enums (rule-based path). */
 export function defaultIntentFromPlan(plan: MusicPlan): PlannerGenerationIntent {
