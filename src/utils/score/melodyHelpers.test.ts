@@ -31,7 +31,7 @@ describe('melodyHelpers', () => {
     const preset = STYLE_PRESETS.funk;
     const slot = { duration: 0.5 };
 
-    const afterLeap = chooseNextDegree(5, 3, 2, 6, slot, plan, preset, 2, 0, 4);
+    const afterLeap = chooseNextDegree(5, 3, 2, 6, slot, plan, preset, 2, 0, 4, buildScaleContext(plan));
     expect(Math.abs(afterLeap - 5)).toBe(1);
   });
 
@@ -41,7 +41,7 @@ describe('melodyHelpers', () => {
     const preset = STYLE_PRESETS.generic;
     const weakSlot = { duration: 0.5 };
 
-    const next = chooseNextDegree(2, 1, 2, 6, weakSlot, lowBiasPlan, preset, 3, 1, 4);
+    const next = chooseNextDegree(2, 1, 2, 6, weakSlot, lowBiasPlan, preset, 3, 1, 4, buildScaleContext(lowBiasPlan));
     const isPassingOrStep = Math.abs(next - 2) <= 1;
     const isNonChordTone = !CHORD_TONE_DEGREES.includes(next as (typeof CHORD_TONE_DEGREES)[number]);
     expect(isPassingOrStep || isNonChordTone).toBe(true);

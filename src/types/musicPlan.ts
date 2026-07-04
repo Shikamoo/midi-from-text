@@ -62,6 +62,16 @@ export interface PlannerGenerationIntent {
   variationLevel: number;
   harmonicComplexity: number;
   melodicRange: { min: string; max: string };
+  /** Raw planner scaleType — drives interval set when present */
+  scaleType: string;
+  /** 0 = stepwise, 1 = wide leaps */
+  leapRate: number;
+  /** 0 = passing tones ok, 1 = chord tones preferred */
+  consonance: number;
+  /** Raw planner motifShape text */
+  motifShape: string;
+  /** Optional pitch anchors from planner notes[] */
+  pitchAnchors: string[];
 }
 
 /** Continuous musical dimensions (0 = low, 1 = high) */

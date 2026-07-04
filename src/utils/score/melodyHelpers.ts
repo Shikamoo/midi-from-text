@@ -6,6 +6,13 @@ import { midiToPitch, pitchToMidi } from '../../types/music';
 import type { Bar, NoteToken } from '../../types/music';
 import type { MusicPlan } from '../../types/musicPlan';
 import { resolvePhraseShape } from './stylePresets';
+import { resolvePlannerScale } from './scaleIntervals';
+import {
+  effectiveChordToneBias,
+  effectiveContour,
+  effectiveLeapRate,
+  resolvePitchAnchorDegrees,
+} from './melodyIntent';
 import type {
   MotifBar,
   RhythmSlot,
@@ -16,11 +23,8 @@ import type {
 import {
   MAX_MELODY_MIDI,
   MIN_MELODY_MIDI,
-  CHORD_TONE_DEGREES,
 } from './types';
 
-const MAJOR = [0, 2, 4, 5, 7, 9, 11];
-const MINOR = [0, 2, 3, 5, 7, 8, 10];
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 const CONTOUR_ARC: Record<MusicPlan['contour'], number[]> = {
@@ -45,9 +49,10 @@ export function phraseArcDegree(
   plan: MusicPlan,
   preset: StylePreset,
 ): number {
+  const contour = effectiveContour(plan);
   const arc = preset.phraseArcDegrees.length > 0
     ? preset.phraseArcDegrees
-    : CONTOUR_ARC[plan.contour];
+    : CONTOUR_ARC[contour];
   const idx = totalBars >= 4 ? barIndex % 4 : barIndex % arc.length;
   return arc[idx % arc.length];
 }
@@ -191,32 +196,44 @@ export function chooseNextDegree(
   hookIndex: number,
   barIndex: number,
   totalBars: number,
+  scale: ScaleContext,
 ): number {
+  const chordToneBias = effectiveChordToneBias(plan);
+  const leapRate = effectiveLeapRate(plan);
+  const maxDegree = scale.maxDegree ?? 6;
   const hook = preset.hookDegrees[hookIndex % preset.hookDegrees.length];
   const arcTarget = phraseArcDegree(barIndex, totalBars, plan, preset);
   const accent = isAccent(rhythmSlot, pitchedIndex, pitchedTotal);
   const weakBeat = isWeakBeat(rhythmSlot, pitchedIndex, pitchedTotal);
+  const anchorDegrees = plan.plannerIntent ? resolvePitchAnchorDegrees(plan, scale) : [];
 
   if (prevDegree === null) {
-    const start = accent ? nearestChordTone(hook) : clampDegree(hook);
+    if (anchorDegrees.length > 0) {
+      const anchor = anchorDegrees[(barIndex + pitchedIndex) % anchorDegrees.length];
+      return applyPlacementBias(anchor, accent, weakBeat, plan, maxDegree);
+    }
+    const start = accent ? nearestChordTone(hook, maxDegree) : clampDegree(hook, maxDegree);
     return start;
   }
 
   if (prevInterval !== null && Math.abs(prevInterval) >= 2) {
     const recoveryDir = prevInterval > 0 ? -1 : 1;
-    const recovered = clampDegree(prevDegree + recoveryDir);
-    if (weakBeat && plan.chordToneBias < 0.68) {
+    const recovered = clampDegree(prevDegree + recoveryDir, maxDegree);
+    if (weakBeat && chordToneBias < 0.68) {
       return recovered;
     }
-    return accent && plan.chordToneBias > 0.45
-      ? nearestChordTone(recovered)
+    return accent && chordToneBias > 0.45
+      ? nearestChordTone(recovered, maxDegree)
       : recovered;
   }
 
   if (plan.motifStrength > 0.58 && pitchedIndex % 2 === 0) {
-    const motifTarget = preset.hookDegrees[hookIndex % preset.hookDegrees.length];
+    let motifTarget = preset.hookDegrees[hookIndex % preset.hookDegrees.length];
+    if (anchorDegrees.length > 0) {
+      motifTarget = anchorDegrees[hookIndex % anchorDegrees.length];
+    }
     if (Math.abs(motifTarget - prevDegree) <= 2) {
-      return applyPlacementBias(motifTarget, accent, weakBeat, plan);
+      return applyPlacementBias(motifTarget, accent, weakBeat, plan, maxDegree);
     }
   }
 
@@ -227,38 +244,45 @@ export function chooseNextDegree(
   let next = prevDegree;
 
   const nearPhraseEnd = totalBars >= 4 && barIndex >= totalBars - 2;
+  const leapThreshold = plan.plannerIntent ? 0.42 : 0.54;
+  const leapSize = leapRate > 0.68 ? 4 : leapRate > 0.52 ? 3 : 2;
   const expressiveLeap =
     !nearPhraseEnd &&
-    plan.stepLeapBalance > 0.54 &&
+    leapRate > leapThreshold &&
     pitchedIndex === Math.max(1, pitchedTotal - 2) &&
     Math.abs(toTarget) >= 3 &&
     accent;
 
   if (expressiveLeap) {
-    next = prevDegree + (toTarget > 0 ? 3 : -3);
+    next = prevDegree + (toTarget > 0 ? leapSize : -leapSize);
+  } else if (leapRate > 0.72 && Math.abs(toTarget) >= 2 && accent && !nearPhraseEnd) {
+    next = prevDegree + (toTarget > 0 ? 2 : -2);
   } else if (toTarget === 0 && pitchedIndex > 0) {
-    next = prevDegree + neighborOffset(pitchedIndex, barIndex);
-  } else if (weakBeat && Math.abs(toTarget) >= 2 && plan.chordToneBias < 0.7) {
-    next = passingToneBetween(prevDegree, target);
+    next = prevDegree + neighborOffset(pitchedIndex, barIndex, leapRate);
+  } else if (weakBeat && Math.abs(toTarget) >= 2 && chordToneBias < 0.7) {
+    next = passingToneBetween(prevDegree, target, maxDegree);
+  } else if (leapRate < 0.32 && Math.abs(toTarget) > 1) {
+    next = prevDegree + stepDir;
   } else {
     next = prevDegree + stepDir;
   }
 
-  if (weakBeat && plan.chordToneBias < 0.72) {
-    return clampDegree(next);
+  if (weakBeat && chordToneBias < 0.72) {
+    return clampDegree(next, maxDegree);
   }
 
-  if (accent && plan.chordToneBias > 0.4) {
-    next = nearestChordTone(next);
+  if (accent && chordToneBias > 0.4) {
+    next = nearestChordTone(next, maxDegree);
   }
 
-  return clampDegree(next);
+  return clampDegree(next, maxDegree);
 }
 
 function phraseBlendWeight(barIndex: number, totalBars: number, plan: MusicPlan): number {
   const base = totalBars >= 4 ? 0.35 + (barIndex % 4) * 0.12 : 0.25;
-  if (plan.contour === 'static') return base * 0.5;
-  if (plan.contour === 'ascending' || plan.contour === 'descending') return Math.min(0.72, base + 0.15);
+  const contour = effectiveContour(plan);
+  if (contour === 'static') return base * 0.5;
+  if (contour === 'ascending' || contour === 'descending') return Math.min(0.72, base + 0.15);
   return base;
 }
 
@@ -267,16 +291,18 @@ function applyPlacementBias(
   accent: boolean,
   weakBeat: boolean,
   plan: MusicPlan,
+  maxDegree = 6,
 ): number {
-  const clamped = clampDegree(degree);
-  if (weakBeat && plan.chordToneBias < 0.72) return clamped;
-  if (accent && plan.chordToneBias > 0.4) return nearestChordTone(clamped);
+  const chordToneBias = effectiveChordToneBias(plan);
+  const clamped = clampDegree(degree, maxDegree);
+  if (weakBeat && chordToneBias < 0.72) return clamped;
+  if (accent && chordToneBias > 0.4) return nearestChordTone(clamped, maxDegree);
   return clamped;
 }
 
-function passingToneBetween(from: number, to: number): number {
+function passingToneBetween(from: number, to: number, maxDegree = 6): number {
   const mid = Math.round((from + to) / 2);
-  const candidate = clampDegree(mid);
+  const candidate = clampDegree(mid, maxDegree);
   if (PASSING_TONE_DEGREES.includes(candidate as (typeof PASSING_TONE_DEGREES)[number])) {
     return candidate;
   }
@@ -287,8 +313,8 @@ function isWeakBeat(slot: RhythmSlot, pitchedIndex: number, pitchedTotal: number
   return !isAccent(slot, pitchedIndex, pitchedTotal);
 }
 
-function neighborOffset(pitchedIndex: number, barIndex: number): number {
-  const pattern = [0, 1, -1, 0, 1, -1];
+function neighborOffset(pitchedIndex: number, barIndex: number, leapRate: number): number {
+  const pattern = leapRate > 0.55 ? [0, 2, -2, 0, 1, -1] : [0, 1, -1, 0, 1, -1];
   const barFlip = barIndex % 2 === 1 ? -1 : 1;
   return pattern[pitchedIndex % pattern.length] * barFlip;
 }
@@ -299,10 +325,11 @@ function isAccent(slot: RhythmSlot, pitchedIndex: number, pitchedTotal: number):
   return pitchedIndex === 0 || pitchedIndex === pitchedTotal - 1;
 }
 
-function nearestChordTone(degree: number): number {
-  let best: number = CHORD_TONE_DEGREES[0];
+function nearestChordTone(degree: number, maxDegree = 6): number {
+  const tones = chordToneDegreesForScale(maxDegree);
+  let best = tones[0];
   let bestDist = 99;
-  for (const tone of CHORD_TONE_DEGREES) {
+  for (const tone of tones) {
     const dist = Math.abs(tone - degree);
     if (dist < bestDist) {
       bestDist = dist;
@@ -312,8 +339,13 @@ function nearestChordTone(degree: number): number {
   return best;
 }
 
-function clampDegree(degree: number): number {
-  return Math.max(0, Math.min(6, degree));
+function chordToneDegreesForScale(maxDegree: number): number[] {
+  if (maxDegree <= 4) return [0, 2, maxDegree];
+  return [0, 2, 4];
+}
+
+function clampDegree(degree: number, maxDegree = 6): number {
+  return Math.max(0, Math.min(maxDegree, degree));
 }
 
 // ─── Motif build / vary / cadence ────────────────────────────────────────────
@@ -347,6 +379,7 @@ export function buildMotif(
       hookIndex,
       barOffset,
       plan.bars,
+      scale,
     );
     if (prev !== null) {
       prevInterval = degree - prev;
@@ -412,7 +445,7 @@ export function varyMotif(bar: MotifBar, ctx: VaryMotifContext): MotifBar {
 
 /** Bar 3 of a 4-bar phrase: lift contour while keeping rhythm. */
 function developBar(bar: MotifBar, ctx: VaryMotifContext): MotifBar {
-  const lift = ctx.plan.contour === 'descending' ? -1 : 1;
+  const lift = effectiveContour(ctx.plan) === 'descending' ? -1 : 1;
   const degrees = bar.degrees.map((d) => clampDegree(d + lift));
   const tokens = bar.tokens.map((token, i) => {
     if (token.pitch === 'rest') return { ...token };
@@ -595,9 +628,12 @@ export function tilePhrase(
 // ─── Scale & tokens ──────────────────────────────────────────────────────────
 
 export function buildScaleContext(plan: MusicPlan): ScaleContext {
-  const intervals = plan.mode === 'major' ? MAJOR : MINOR;
   const brightnessShift = Math.round((plan.brightness - 0.5) * 4);
   const intent = plan.plannerIntent;
+  const resolved = intent
+    ? resolvePlannerScale(intent.scaleType, plan.mode)
+    : resolvePlannerScale(plan.mode, plan.mode);
+  const intervals = resolved.intervals;
 
   if (!intent) {
     const root =
@@ -613,7 +649,12 @@ export function buildScaleContext(plan: MusicPlan): ScaleContext {
     }
 
     const filtered = notes.filter((m) => m >= MIN_MELODY_MIDI && m <= MAX_MELODY_MIDI);
-    return { notes: filtered.length > 0 ? filtered : notes, rootMidi: root };
+    return {
+      notes: filtered.length > 0 ? filtered : notes,
+      rootMidi: root,
+      scaleId: resolved.id,
+      maxDegree: resolved.maxDegree,
+    };
   }
 
   const bounds = melodyMidiBounds(plan);
@@ -634,7 +675,12 @@ export function buildScaleContext(plan: MusicPlan): ScaleContext {
 
   const filtered = notes.filter((m) => m >= bounds.min && m <= bounds.max);
   const fallback = notes.filter((m) => m >= MIN_MELODY_MIDI && m <= MAX_MELODY_MIDI);
-  return { notes: filtered.length > 0 ? filtered : fallback, rootMidi: root };
+  return {
+    notes: filtered.length > 0 ? filtered : fallback,
+    rootMidi: root,
+    scaleId: resolved.id,
+    maxDegree: resolved.maxDegree,
+  };
 }
 
 function keyToPitchClass(key: string): number {

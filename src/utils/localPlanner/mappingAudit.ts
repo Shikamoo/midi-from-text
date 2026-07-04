@@ -37,8 +37,10 @@ export function buildMappingAudit(
   });
   notes.push({
     field: 'keyCenter / scaleType',
-    disposition: 'preserved',
-    detail: `→ ${plan.key} ${plan.mode}`,
+    disposition: intent ? 'preserved' : 'preserved',
+    detail: intent
+      ? `→ ${plan.key} · scale ${intent.scaleType} (${plan.mode} harmony)`
+      : `→ ${plan.key} ${plan.mode}`,
   });
   notes.push({
     field: 'totalBars / phraseBars',
@@ -90,19 +92,38 @@ export function buildMappingAudit(
   });
 
   notes.push({
+    field: 'leapRate / consonance',
+    disposition: intent ? 'preserved' : 'approximated',
+    detail: intent
+      ? `→ leapRate ${intent.leapRate.toFixed(2)}, consonance ${intent.consonance.toFixed(2)}`
+      : `→ stepLeapBalance ${plan.stepLeapBalance.toFixed(2)}, chordToneBias ${plan.chordToneBias.toFixed(2)}`,
+  });
+
+  notes.push({
     field: 'style / mood[]',
     disposition: 'approximated',
     detail: `→ genre ${plan.genre}, mood ${plan.mood}`,
   });
   notes.push({
-    field: 'motifShape / articulation / dynamics',
+    field: 'motifShape',
+    disposition: intent ? 'preserved' : 'approximated',
+    detail: intent
+      ? `→ contour ${plan.contour} from "${intent.motifShape}"`
+      : `→ contour ${plan.contour}`,
+  });
+  notes.push({
+    field: 'articulation / dynamics',
     disposition: 'approximated',
-    detail: `→ contour ${plan.contour}, velocity ${plan.velocity}`,
+    detail: `→ velocity ${plan.velocity}`,
   });
   notes.push({
     field: 'notes[]',
-    disposition: planner.notes.length > 0 ? 'preserved' : 'dropped',
-    detail: planner.notes.length > 0 ? `${planner.notes.length} pitch hints` : 'empty (not used by generator)',
+    disposition: intent && intent.pitchAnchors.length > 0 ? 'preserved' : 'dropped',
+    detail: intent && intent.pitchAnchors.length > 0
+      ? `${intent.pitchAnchors.length} pitch anchors → melody`
+      : planner.notes.length > 0
+        ? `${planner.notes.length} hints (not mapped)`
+        : 'empty',
   });
 
   return notes;
@@ -132,6 +153,8 @@ export function summarizePlannerMapping(
   return formatMappingAuditSummary(buildMappingAudit(planner, plan));
 }
 
+export { buildMelodyIntentSummary } from '../score/melodyIntent';
+
 /** Default intent synthesized from legacy enums (rule-based path). */
 export function defaultIntentFromPlan(plan: MusicPlan): PlannerGenerationIntent {
   const densityToRhythm = plan.density === 'sparse' ? 0.3 : plan.density === 'dense' ? 0.75 : 0.5;
@@ -154,6 +177,11 @@ export function defaultIntentFromPlan(plan: MusicPlan): PlannerGenerationIntent 
       : registerBias === 'high'
         ? { min: 'C4', max: 'C6' }
         : { min: 'C4', max: 'A5' },
+    scaleType: plan.mode,
+    leapRate: plan.stepLeapBalance,
+    consonance: plan.chordToneBias,
+    motifShape: plan.contour,
+    pitchAnchors: [],
   };
 }
 

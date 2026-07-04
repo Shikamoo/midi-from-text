@@ -6,7 +6,7 @@ import type { MusicPlan, PlanAssumption, PlanDefaults, PlanParseResult } from '.
 import type { PlannerMusicPlan } from '../utils/localPlanner/schema';
 import { promptToPlan } from '../utils/promptToPlan';
 import { mapToGeneratorPlan } from '../utils/localPlanner/mapToGeneratorPlan';
-import type { FieldMappingNote } from '../utils/localPlanner/mappingAudit';
+import { buildMelodyIntentSummary, type FieldMappingNote } from '../utils/localPlanner/mappingAudit';
 import { fetchMusicPlan, type PlannerClientResult } from './plannerClient';
 import { isLocalPlannerEnabled } from './plannerConfig';
 
@@ -26,6 +26,7 @@ export interface PlanFromPromptResult {
   plannerMessage: string | null;
   model: string | null;
   mappingAudit?: FieldMappingNote[];
+  melodyIntentSummary?: string;
 }
 
 export async function planFromPromptAsync(
@@ -90,6 +91,7 @@ function plannerBasedResult(
     plannerMessage: message,
     model: plannerResult.model,
     mappingAudit,
+    melodyIntentSummary: buildMelodyIntentSummary(plannerPlan, plan),
   };
 }
 

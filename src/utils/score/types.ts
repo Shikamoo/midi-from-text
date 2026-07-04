@@ -42,6 +42,10 @@ export interface VaryMotifContext {
 export interface ScaleContext {
   notes: number[];
   rootMidi: number;
+  /** Resolved scale id when from planner intent */
+  scaleId?: string;
+  /** Max scale-degree index within one octave (default 6 = diatonic) */
+  maxDegree?: number;
 }
 
 export const MIN_MELODY_MIDI = 36;

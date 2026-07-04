@@ -76,11 +76,12 @@ describe('planToScore', () => {
   it('chooseNextDegree favors stepwise motion with hook recall', () => {
     const plan = promptToPlan('funky melody').plan;
     const preset = STYLE_PRESETS.funk;
+    const scale = buildScaleContext(plan);
     const first = chooseNextDegree(
-      null, null, 0, 6, { duration: 0.5, accent: true }, plan, preset, 0, 0, 4,
+      null, null, 0, 6, { duration: 0.5, accent: true }, plan, preset, 0, 0, 4, scale,
     );
     const second = chooseNextDegree(
-      first, 1, 1, 6, { duration: 0.5 }, plan, preset, 1, 0, 4,
+      first, 1, 1, 6, { duration: 0.5 }, plan, preset, 1, 0, 4, scale,
     );
     expect(Math.abs(second - first)).toBeLessThanOrEqual(2);
   });

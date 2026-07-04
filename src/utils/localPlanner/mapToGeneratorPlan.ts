@@ -3,7 +3,6 @@
  */
 
 import type {
-  Contour,
   Density,
   Genre,
   Mood,
@@ -17,6 +16,8 @@ import type {
 } from '../../types/musicPlan';
 import type { PlannerMusicPlan } from './schema';
 import { buildMappingAudit, type FieldMappingNote } from './mappingAudit';
+import { melodyIntentFieldsFromPlanner } from '../score/melodyIntent';
+import { motifShapeToContour } from '../score/melodyIntent';
 
 export interface MapToGeneratorOptions extends PlanDefaults {
   seed?: number;
@@ -99,6 +100,7 @@ export function mapToGeneratorPlan(
     variationLevel: variationRate,
     harmonicComplexity: planner.harmonicComplexity,
     melodicRange: { ...planner.melodicRange },
+    ...melodyIntentFieldsFromPlanner(planner),
   };
 
   assumptions.push({
@@ -189,14 +191,6 @@ function resolveGenre(style: string, extra: string): Genre {
     if (re.test(text)) return genre;
   }
   return 'generic';
-}
-
-function motifShapeToContour(shape: string): Contour {
-  const s = shape.toLowerCase();
-  if (/ascend|rise|climb|up/i.test(s)) return 'ascending';
-  if (/descend|fall|drop|down/i.test(s)) return 'descending';
-  if (/static|flat|pedal|drone/i.test(s)) return 'static';
-  return 'undulating';
 }
 
 function densitiesToEnum(rhythm: number, rest: number): Density {

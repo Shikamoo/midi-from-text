@@ -34,6 +34,7 @@ export interface PromptPlanOverride {
   llmPlan?: LlmMusicPlan | null;
   mappingAudit?: FieldMappingNote[];
   mappingAuditSummary?: string;
+  melodyIntentSummary?: string;
 }
 
 export interface ParseMusicInputOptions {

@@ -182,6 +182,7 @@ export function useMusicGenerator() {
           mappingAuditSummary: planResult.mappingAudit
             ? formatMappingAuditSummary(planResult.mappingAudit)
             : undefined,
+          melodyIntentSummary: planResult.melodyIntentSummary,
         };
       }
 
