@@ -38,7 +38,8 @@ export function useMusicInput(
         bars,
         instrument,
         harmonyGeneration,
+        promptPlanOverride: options.promptPlanOverride,
       }),
-    [rawText, beatsPerBar, beatValue, bpm, key, mode, bars, instrument, harmonyGeneration],
+    [rawText, beatsPerBar, beatValue, bpm, key, mode, bars, instrument, harmonyGeneration, options.promptPlanOverride],
   );
 }

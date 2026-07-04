@@ -19,6 +19,7 @@ import { CleanupControls } from './components/CleanupControls';
 import { AudioAnalysisPanel } from './components/AudioAnalysisPanel';
 import { ScoreViewer } from './components/ScoreViewer';
 import { ScoreSummary } from './components/ScoreSummary';
+import { LocalPlannerPanel } from './components/LocalPlannerPanel';
 import { exportMidi, defaultMidiFilename } from './utils/midiExporter';
 import { applyRepair, type RepairActionId } from './utils/repairMusicText';
 import { scoreMidiFilename } from './utils/scoreToMusicData';
@@ -77,6 +78,19 @@ export default function App() {
     generate,
     promptDetectionSummary,
     committedFingerprint,
+    useLocalPlanner,
+    plannerStatus,
+    llmPlan,
+    plannerMessage,
+    plannerWarning,
+    plannerSource,
+    plannerModel,
+    plannerSeed,
+    plannerTemperature,
+    plannerVariation,
+    committedPlanOverride,
+    setUseLocalPlanner,
+    setPlannerControls,
   } = useMusicGenerator();
 
   // ── MusicXML flow ───────────────────────────────────────────────────────────
@@ -191,6 +205,14 @@ export default function App() {
   const isTextMode = appMode === 'prompt' || appMode === 'notes';
   const currentText = config.mode === 'prompt' ? config.promptText : config.notesText;
 
+  const promptPlanOverride =
+    config.mode === 'prompt' &&
+    useLocalPlanner &&
+    committedPlanOverride &&
+    config.promptText.trim() === (committedPlanOverride.llmPlan?.prompt ?? config.promptText.trim())
+      ? committedPlanOverride
+      : undefined;
+
   const musicInput = useMusicInput(currentText, {
     bpm: config.bpm,
     key: config.key,
@@ -201,6 +223,7 @@ export default function App() {
     instrument: config.instrument,
     harmonyGeneration:
       config.mode === 'prompt' ? harmonyGenerationFromConfig(config) : undefined,
+    promptPlanOverride,
   });
 
   const textInputIsEmpty = isTextMode && currentText.trim().length === 0;
@@ -350,6 +373,31 @@ export default function App() {
                   spellCheck={config.mode === 'prompt'}
                 />
               </div>
+
+              {config.mode === 'prompt' && (
+                <div className="panel-section">
+                  <LocalPlannerPanel
+                    enabled={useLocalPlanner}
+                    onEnabledChange={setUseLocalPlanner}
+                    status={plannerStatus}
+                    message={plannerMessage}
+                    warning={plannerWarning}
+                    source={plannerSource}
+                    model={plannerModel}
+                    llmPlan={llmPlan}
+                    generatorPlan={committedPlanOverride?.plan ?? null}
+                    seed={plannerSeed}
+                    temperature={plannerTemperature}
+                    variation={plannerVariation}
+                    onSeedChange={(seed) => setPlannerControls({ seed })}
+                    onTemperatureChange={(temperature) => setPlannerControls({ temperature })}
+                    onVariationChange={(variation) => setPlannerControls({ variation })}
+                    onRegenerate={handleGenerate}
+                    isGenerating={isGenerating}
+                    promptEmpty={textInputIsEmpty}
+                  />
+                </div>
+              )}
 
               {/* Settings */}
               <div className="panel-section">

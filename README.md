@@ -167,6 +167,49 @@ Local checks currently pass:
 E4 q, G4 q, A4 q, B4 q, C5 h, B4 q, A4 q, G4 q, F4 q, E4 h
 ```
 
+## Local planner (optional)
+
+Prompt mode can use a **local Ollama model** to infer high-level musical intent (tempo, meter, mood, texture, etc.) before the existing `planToScore` generator runs. When Ollama is off or fails, the app falls back to the built-in rule-based `promptToPlan` parser — generation still works.
+
+### Quick start
+
+1. Install [Ollama](https://ollama.com/download) and pull a model:
+
+```bash
+ollama pull llama3.1:8b
+```
+
+2. Copy `.env.example` → `.env.local` and set `VITE_ENABLE_LOCAL_PLANNER=true`.
+
+3. Run the app:
+
+```bash
+npm install
+npm run dev
+```
+
+4. In **Prompt** mode, enable **Use local planner** and click **Generate**.
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `VITE_ENABLE_LOCAL_PLANNER` | `false` | Show planner UI |
+| `VITE_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API |
+| `VITE_OLLAMA_MODEL` | `llama3.1:8b` | Model name |
+| `VITE_OLLAMA_TIMEOUT_MS` | `20000` | Request timeout |
+| `VITE_OLLAMA_TEMPERATURE` | `0` | Sampling temperature (0 recommended with structured JSON) |
+
+See [docs/LOCAL_PLANNER.md](docs/LOCAL_PLANNER.md) for API details, troubleshooting, and limitations.
+
+### Example API call
+
+```bash
+curl -X POST http://localhost:5173/api/plan \
+  -H "Content-Type: application/json" \
+  -d "{\"prompt\":\"dark cinematic strings\",\"bars\":8,\"temperature\":0,\"seed\":42}"
+```
+
 ## Limitations
 
 - Prompt mode works best with concrete musical wording
@@ -181,6 +224,7 @@ E4 q, G4 q, A4 q, B4 q, C5 h, B4 q, A4 q, G4 q, F4 q, E4 h
 - Vite
 - Vitest
 - Oxlint
+- Ollama (optional local planner) — see [docs/LOCAL_PLANNER.md](docs/LOCAL_PLANNER.md)
 
 ## License
 

@@ -5,7 +5,7 @@
  */
 
 import type { MusicConfig, MusicData } from '../types/music';
-import { parseMusicInput, parseResultToMusicData } from './parseMusicInput';
+import { parseMusicInput, parseResultToMusicData, type PromptPlanOverride } from './parseMusicInput';
 import { scoreFingerprint } from './scoreVerification';
 import { DEFAULT_HARMONY_GENERATION, harmonyGenerationFromConfig } from './harmonySettings';
 
@@ -36,7 +36,15 @@ export interface EngineResult {
   committedFingerprint: string | null;
 }
 
-export function generateMusic(rawConfig: MusicConfig): EngineResult {
+/** Optional planner output — when set, prompt mode skips rule-based promptToPlan. */
+export interface GenerateMusicOptions {
+  promptPlanOverride?: PromptPlanOverride;
+}
+
+export function generateMusic(
+  rawConfig: MusicConfig,
+  options: GenerateMusicOptions = {},
+): EngineResult {
   const text = rawConfig.mode === 'prompt' ? rawConfig.promptText : rawConfig.notesText;
 
   if (!text.trim()) {
@@ -59,6 +67,7 @@ export function generateMusic(rawConfig: MusicConfig): EngineResult {
     bars: rawConfig.bars,
     instrument: rawConfig.instrument,
     harmonyGeneration: harmonyGenerationFromConfig(rawConfig),
+    promptPlanOverride: options.promptPlanOverride,
   });
 
   if (input.hasErrors) {

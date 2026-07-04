@@ -21,7 +21,17 @@ import {
 } from './parsedScoreToMidiEvents';
 import type { DetectedMode, HarmonyGenerationSettings, MusicData, ParsedScore, ParseIssue } from '../types/music';
 import type { MusicPlan, PlanAssumption } from '../types/musicPlan';
+import type { LlmMusicPlan } from '../types/llmMusicPlan';
 import { DEFAULT_HARMONY_GENERATION } from './harmonySettings';
+
+export interface PromptPlanOverride {
+  plan: MusicPlan;
+  confidence: number;
+  assumptions: PlanAssumption[];
+  source?: 'ollama' | 'fallback' | 'rules';
+  plannerMessage?: string | null;
+  llmPlan?: LlmMusicPlan | null;
+}
 
 export interface ParseMusicInputOptions {
   bpm?: number;
@@ -33,6 +43,8 @@ export interface ParseMusicInputOptions {
   instrument?: number;
   /** Prompt-mode harmony generation (affects fingerprint). */
   harmonyGeneration?: HarmonyGenerationSettings;
+  /** Skip promptToPlan when a planner or cached plan is supplied. */
+  promptPlanOverride?: PromptPlanOverride;
 }
 
 export interface ParseMusicInputResult {
@@ -86,7 +98,7 @@ export function parseMusicInput(
   }
 
   if (detectedMode.mode === 'prompt-text') {
-    return runPromptPipeline(trimmed, detectedMode, opts);
+    return runPromptPipeline(trimmed, detectedMode, opts, options);
   }
 
   return runNotePipeline(trimmed, detectedMode, opts);
@@ -109,17 +121,37 @@ function runPromptPipeline(
   text: string,
   detectedMode: DetectedMode,
   defaults: ReturnType<typeof resolveOptions>,
+  options: ParseMusicInputOptions,
 ): ParseMusicInputResult {
-  const { plan, confidence, assumptions } = promptToPlan(text, {
-    tempo: defaults.bpm,
-    key: defaults.key,
-    mode: defaults.mode,
-    beatsPerBar: defaults.beatsPerBar,
-    beatValue: defaults.beatValue,
-    bars: defaults.bars,
-    instrument: defaults.instrument,
-  });
+  const override = options.promptPlanOverride;
+  const { plan, confidence, assumptions } = override
+    ? { plan: override.plan, confidence: override.confidence, assumptions: override.assumptions }
+    : promptToPlan(text, {
+        tempo: defaults.bpm,
+        key: defaults.key,
+        mode: defaults.mode,
+        beatsPerBar: defaults.beatsPerBar,
+        beatValue: defaults.beatValue,
+        bars: defaults.bars,
+        instrument: defaults.instrument,
+      });
 
+  return buildPromptParseResult(text, detectedMode, plan, confidence, assumptions, defaults, {
+    source: override?.source,
+    plannerMessage: override?.plannerMessage,
+  });
+}
+
+/** Build a prompt-mode parse result from an existing MusicPlan. */
+export function buildPromptParseResult(
+  _text: string,
+  detectedMode: DetectedMode,
+  plan: MusicPlan,
+  confidence: number,
+  assumptions: PlanAssumption[],
+  defaults: ReturnType<typeof resolveOptions>,
+  meta: { source?: 'ollama' | 'fallback' | 'rules'; plannerMessage?: string | null } = {},
+): ParseMusicInputResult {
   const score = planToScore(plan, defaults.harmonyGeneration);
   const normalizedText = scoreToCanonicalText(score);
   const exportMeta: ScoreExportMetadata = {
@@ -129,13 +161,26 @@ function runPromptPipeline(
   };
   const previewData = parsedScoreToMusicData(score, exportMeta);
 
+  const sourceLabel = meta.source === 'ollama'
+    ? 'Local planner'
+    : meta.source === 'fallback'
+      ? 'Planner fallback'
+      : 'Prompt interpreted as';
   const issues: ParseIssue[] = [
     {
       severity: 'info',
-      message: `Prompt interpreted as: ${describeMusicPlan(plan)}`,
+      message: `${sourceLabel}: ${describeMusicPlan(plan)}`,
       location: 'input',
       stage: 'plan',
     },
+    ...(meta.plannerMessage
+      ? [{
+          severity: 'warning' as const,
+          message: meta.plannerMessage,
+          location: 'planner',
+          stage: 'plan' as const,
+        }]
+      : []),
     ...assumptions.map((a) => ({
       severity: 'info' as const,
       message: a.message,
@@ -154,7 +199,7 @@ function runPromptPipeline(
     assumptions,
     issues,
     hasErrors: false,
-    hasWarnings: false,
+    hasWarnings: issues.some((i) => i.severity === 'warning'),
     canExport: true,
     exportMeta,
   };
