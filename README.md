@@ -144,13 +144,23 @@ npm run lint
 npm test
 ```
 
+### Diversity evaluation (QA)
+
+Measure pipeline diversity metrics offline (legacy vs planner fixtures):
+
+```bash
+npm run eval:diversity
+```
+
+See [docs/DIVERSITY_EVAL.md](docs/DIVERSITY_EVAL.md) for metrics, layer-impact summary, and CSV output.
+
 ## Current status
 
 Local checks currently pass:
 
 - Build: passing
 - Lint: passing
-- Tests: 71/71 passing
+- Tests: passing
 
 ## Example inputs
 
