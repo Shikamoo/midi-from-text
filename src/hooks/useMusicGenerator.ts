@@ -13,6 +13,7 @@ import { planFromPromptAsync } from '../planner/planFromPrompt';
 import { checkPlannerHealth } from '../planner/plannerClient';
 import { isLocalPlannerEnabled, DEFAULT_PLANNER_SEED, DEFAULT_PLANNER_TEMPERATURE } from '../planner/plannerConfig';
 import type { PromptPlanOverride } from '../utils/parseMusicInput';
+import { formatMappingAuditSummary } from '../utils/localPlanner/mappingAudit';
 
 export interface MusicGeneratorState {
   config: MusicConfig;
@@ -177,6 +178,10 @@ export function useMusicGenerator() {
           source: planResult.source,
           plannerMessage: planResult.plannerMessage,
           llmPlan: planResult.llmPlan,
+          mappingAudit: planResult.mappingAudit,
+          mappingAuditSummary: planResult.mappingAudit
+            ? formatMappingAuditSummary(planResult.mappingAudit)
+            : undefined,
         };
       }
 

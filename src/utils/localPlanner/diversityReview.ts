@@ -1,10 +1,10 @@
 /**
  * Diversity review helpers for planner → generator mapping.
  *
- * Where diversity is still lost (see also diversity.test.ts):
+ * Where diversity may still be lost (see also diversity.test.ts):
  * - Planner output: Ollama may still converge on similar defaults despite prompts.
- * - Mapping layer: enums (mood, genre, density, syncopation, register, repetition) collapse continuous values.
- * - Generator constraints: motifLength capped at 1–2 bars; harmony texture not fully driven by planner texture.
+ * - Mapping layer: mood, genre, contour, and instrument still approximate free-text planner fields.
+ * - Generator: planner notes[] hints are not yet applied to melody.
  */
 
 import type { MusicPlan } from '../../types/musicPlan';
@@ -35,6 +35,13 @@ export function generatorPlanFingerprint(plan: MusicPlan): string {
     plan.chordToneBias.toFixed(2),
     plan.stepLeapBalance.toFixed(2),
     plan.cadenceStrength.toFixed(2),
+    plan.plannerIntent?.texture ?? '',
+    plan.plannerIntent?.registerBias ?? '',
+    plan.plannerIntent ? plan.plannerIntent.rhythmDensity.toFixed(2) : '',
+    plan.plannerIntent ? plan.plannerIntent.syncopationLevel.toFixed(2) : '',
+    plan.plannerIntent ? plan.plannerIntent.harmonicComplexity.toFixed(2) : '',
+    plan.plannerIntent?.melodicRange.min ?? '',
+    plan.plannerIntent?.melodicRange.max ?? '',
   ].join('|');
 }
 

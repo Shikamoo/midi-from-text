@@ -16,6 +16,12 @@ import {
 } from './score/melodyHelpers';
 import { deriveHarmony } from './score/harmony';
 import { resolveStylePreset } from './score/stylePresets';
+import {
+  deriveBassLine,
+  resolveHarmonySettingsForTexture,
+  shouldGenerateBass,
+  shouldGenerateHarmony,
+} from './score/texture';
 import type { HarmonyGenerationSettings } from '../types/music';
 import { DEFAULT_HARMONY_GENERATION } from './harmonySettings';
 
@@ -40,12 +46,21 @@ export function planToScore(
     beatValue: plan.beatValue,
   };
 
-  const harmonyTokens = deriveHarmony(melodyScore, plan, scale, preset, harmonyGeneration);
+  const resolvedHarmony = resolveHarmonySettingsForTexture(plan, harmonyGeneration);
+
+  const harmonyTokens = shouldGenerateHarmony(plan)
+    ? deriveHarmony(melodyScore, plan, scale, preset, resolvedHarmony)
+    : undefined;
+
+  const bassTokens = shouldGenerateBass(plan)
+    ? deriveBassLine(melodyScore, plan, scale, preset)
+    : undefined;
 
   return {
     ...melodyScore,
     harmonyTokens,
-    harmonyGeneration,
+    bassTokens,
+    harmonyGeneration: resolvedHarmony,
   };
 }
 

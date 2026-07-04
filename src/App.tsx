@@ -386,6 +386,7 @@ export default function App() {
                     model={plannerModel}
                     llmPlan={llmPlan}
                     generatorPlan={committedPlanOverride?.plan ?? null}
+                    mappingAuditSummary={committedPlanOverride?.mappingAuditSummary ?? null}
                     seed={plannerSeed}
                     temperature={plannerTemperature}
                     variation={plannerVariation}

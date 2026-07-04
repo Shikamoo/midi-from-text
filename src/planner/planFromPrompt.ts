@@ -6,6 +6,7 @@ import type { MusicPlan, PlanAssumption, PlanDefaults, PlanParseResult } from '.
 import type { PlannerMusicPlan } from '../utils/localPlanner/schema';
 import { promptToPlan } from '../utils/promptToPlan';
 import { mapToGeneratorPlan } from '../utils/localPlanner/mapToGeneratorPlan';
+import type { FieldMappingNote } from '../utils/localPlanner/mappingAudit';
 import { fetchMusicPlan, type PlannerClientResult } from './plannerClient';
 import { isLocalPlannerEnabled } from './plannerConfig';
 
@@ -24,6 +25,7 @@ export interface PlanFromPromptResult {
   source: 'ollama' | 'fallback' | 'rules';
   plannerMessage: string | null;
   model: string | null;
+  mappingAudit?: FieldMappingNote[];
 }
 
 export async function planFromPromptAsync(
@@ -56,7 +58,7 @@ function plannerBasedResult(
   options: PlanFromPromptOptions,
   plannerResult: PlannerClientResult,
 ): PlanFromPromptResult {
-  const { plan, assumptions } = mapToGeneratorPlan(plannerPlan, {
+  const { plan, assumptions, mappingAudit } = mapToGeneratorPlan(plannerPlan, {
     tempo: options.tempo,
     key: options.key,
     mode: options.mode,
@@ -87,6 +89,7 @@ function plannerBasedResult(
     source,
     plannerMessage: message,
     model: plannerResult.model,
+    mappingAudit,
   };
 }
 

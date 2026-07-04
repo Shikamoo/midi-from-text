@@ -1,6 +1,5 @@
 /**
  * Maps validated PlannerMusicPlan → generator MusicPlan (types/musicPlan.ts).
- * Approximations are noted inline where enums collapse continuous values.
  */
 
 import type {
@@ -9,6 +8,7 @@ import type {
   Genre,
   Mood,
   MusicPlan,
+  PlannerGenerationIntent,
   PlanAssumption,
   PlanDefaults,
   Register,
@@ -16,6 +16,7 @@ import type {
   Syncopation,
 } from '../../types/musicPlan';
 import type { PlannerMusicPlan } from './schema';
+import { buildMappingAudit, type FieldMappingNote } from './mappingAudit';
 
 export interface MapToGeneratorOptions extends PlanDefaults {
   seed?: number;
@@ -25,6 +26,7 @@ export interface MapToGeneratorOptions extends PlanDefaults {
 export interface MapToGeneratorResult {
   plan: MusicPlan;
   assumptions: PlanAssumption[];
+  mappingAudit: FieldMappingNote[];
 }
 
 const STYLE_TO_GENRE: Array<[RegExp, Genre]> = [
@@ -66,7 +68,6 @@ export function mapToGeneratorPlan(
   const mood = resolveMood(planner.mood);
   const genre = resolveGenre(planner.style, planner.mood.join(' '));
   const contour = motifShapeToContour(planner.motifShape);
-  // rhythmDensity + restDensity → sparse/medium/dense
   const density = densitiesToEnum(planner.rhythmDensity, planner.restDensity);
   const syncopation = syncopationToEnum(planner.syncopation);
   const register = registerBiasToRegister(planner.registerBias, planner.melodicRange);
@@ -76,20 +77,33 @@ export function mapToGeneratorPlan(
   const variationRate = clamp01(planner.variation + seedMix * 0.08);
   const motifStrength = clamp01(planner.repetition * 0.85 + (1 - variationRate) * 0.15);
   const groove = clamp01(planner.syncopation * 0.7 + planner.percussionEnergy * 0.3);
-  const brightness = moodToBrightness(mood, planner.mood);
+  const brightness = moodToBrightness(mood, planner.mood, planner.registerBias);
   const energy = clamp01(planner.percussionEnergy * 0.55 + planner.rhythmDensity * 0.45);
-  // consonance + harmonicComplexity → chordToneBias / cadenceStrength
   const chordToneBias = clamp01(planner.consonance * 0.6 + planner.harmonicComplexity * 0.4);
   const stepLeapBalance = clamp01(planner.leapRate);
-  const cadenceStrength = clamp01(planner.harmonicComplexity * 0.5 + planner.consonance * 0.35 + 0.15);
+  const cadenceStrength = clamp01(
+    planner.harmonicComplexity * 0.5 + planner.consonance * 0.35 + 0.15,
+  );
 
-  const motifLength = planner.phraseBars <= 1 ? 1 : planner.phraseBars >= 3 ? 2 : planner.phraseBars;
-  const velocity = dynamicsToVelocity(planner.dynamics, energy);
   const bars = options.bars ?? planner.totalBars;
+  const motifLength = clampInt(planner.phraseBars, 1, Math.min(16, bars));
+  const velocity = dynamicsToVelocity(planner.dynamics, energy);
+
+  const plannerIntent: PlannerGenerationIntent = {
+    texture: planner.texture,
+    registerBias: planner.registerBias,
+    rhythmDensity: planner.rhythmDensity,
+    restDensity: planner.restDensity,
+    syncopationLevel: planner.syncopation,
+    repetitionLevel: planner.repetition,
+    variationLevel: variationRate,
+    harmonicComplexity: planner.harmonicComplexity,
+    melodicRange: { ...planner.melodicRange },
+  };
 
   assumptions.push({
     field: 'tempo',
-    message: `Planner tempo: ${planner.tempoBpm} BPM`,
+    message: `Planner tempo: ${planner.tempoBpm} BPM · texture ${planner.texture}`,
     confidence: 0.85,
     source: 'local-planner',
   });
@@ -119,17 +133,26 @@ export function mapToGeneratorPlan(
     chordToneBias,
     stepLeapBalance,
     cadenceStrength,
+    plannerIntent,
   };
 
   if (planner.articulation.toLowerCase().includes('staccato')) {
     plan.velocity = Math.min(plan.velocity, 75);
   }
 
-  return { plan, assumptions };
+  return {
+    plan,
+    assumptions,
+    mappingAudit: buildMappingAudit(planner, plan),
+  };
 }
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
+}
+
+function clampInt(n: number, min: number, max: number): number {
+  return Math.round(Math.max(min, Math.min(max, n)));
 }
 
 function seedVariation(seed?: number, boost?: number): number {
@@ -195,6 +218,7 @@ function registerBiasToRegister(
 ): Register {
   if (bias === 'low') return 'low';
   if (bias === 'high') return 'high';
+  if (bias === 'wide') return 'mid';
   const minOct = octaveFromPitch(range.min);
   const maxOct = octaveFromPitch(range.max);
   const center = (minOct + maxOct) / 2;
@@ -214,13 +238,18 @@ function repetitionToEnum(value: number): Repetition {
   return 'medium';
 }
 
-function moodToBrightness(mood: Mood, tags: string[]): number {
+function moodToBrightness(
+  mood: Mood,
+  tags: string[],
+  registerBias: PlannerMusicPlan['registerBias'],
+): number {
   let b = 0.5;
   if (mood === 'bright') b = 0.75;
   if (mood === 'dark') b = 0.25;
   if (mood === 'calm') b = 0.55;
   if (mood === 'energetic') b = 0.65;
   if (/cinematic|epic/i.test(tags.join(' '))) b += 0.1;
+  if (registerBias === 'wide') b += 0.05;
   return clamp01(b);
 }
 

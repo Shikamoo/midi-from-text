@@ -2,7 +2,7 @@
  * Pure melody-generation helpers used by planToScore.
  */
 
-import { midiToPitch } from '../../types/music';
+import { midiToPitch, pitchToMidi } from '../../types/music';
 import type { Bar, NoteToken } from '../../types/music';
 import type { MusicPlan } from '../../types/musicPlan';
 import { resolvePhraseShape } from './stylePresets';
@@ -52,6 +52,29 @@ export function phraseArcDegree(
   return arc[idx % arc.length];
 }
 
+/** Melody MIDI bounds — uses planner melodic range when available. */
+export function melodyMidiBounds(plan: MusicPlan): { min: number; max: number } {
+  const intent = plan.plannerIntent;
+  if (intent?.melodicRange) {
+    let min = pitchToMidi(intent.melodicRange.min);
+    let max = pitchToMidi(intent.melodicRange.max);
+    if (min > max) [min, max] = [max, min];
+    if (intent.registerBias === 'wide') {
+      min = Math.max(24, min - 6);
+      max = Math.min(96, max + 6);
+    }
+    return {
+      min: Math.max(MIN_MELODY_MIDI, min),
+      max: Math.min(MAX_MELODY_MIDI, max),
+    };
+  }
+  const octave = REGISTER_OCTAVE[plan.register];
+  return {
+    min: Math.max(MIN_MELODY_MIDI, (octave + 1) * 12),
+    max: Math.min(MAX_MELODY_MIDI, (octave + 2) * 12 + 11),
+  };
+}
+
 // ─── Rhythm ────────────────────────────────────────────────────────────────────
 
 /** Build one bar of rhythm from plan + style preset. */
@@ -60,6 +83,33 @@ export function buildRhythmPattern(
   preset: StylePreset,
   barOffset: number,
 ): RhythmSlot[] {
+  const intent = plan.plannerIntent;
+  if (intent) {
+    const activity = intent.rhythmDensity * (1 - intent.restDensity * 0.5);
+    if (activity < 0.35) {
+      return sparseRhythm(plan.beatsPerBar);
+    }
+    if (activity > 0.65) {
+      return denseRhythm(plan.beatsPerBar);
+    }
+    const patterns = preset.rhythmPatterns;
+    const base = patterns[barOffset % patterns.length].map((slot) => ({ ...slot }));
+    if (intent.syncopationLevel > 0.55 || plan.groove > 0.58) {
+      return applySyncopation(base, intent.syncopationLevel, barOffset);
+    }
+    if (intent.syncopationLevel < 0.25) {
+      return [
+        { duration: 0.5, accent: true },
+        { duration: 0.5 },
+        { duration: 1 },
+        { duration: 0.5 },
+        { duration: 0.5, accent: true },
+        { duration: 1 },
+      ];
+    }
+    return base;
+  }
+
   const patterns = preset.rhythmPatterns;
   const base = patterns[barOffset % patterns.length].map((slot) => ({ ...slot }));
 
@@ -336,7 +386,10 @@ export function varyMotif(bar: MotifBar, ctx: VaryMotifContext): MotifBar {
   const degrees = [...bar.degrees];
 
   if (shape === 'slight-variation' || shape === 'call-response') {
-    const variationCount = ctx.plan.variationRate > 0.55 ? 2 : 1;
+    const intent = ctx.plan.plannerIntent;
+    const variationCount = intent
+      ? (intent.variationLevel > 0.55 ? 2 : intent.variationLevel > 0.3 ? 1 : 0)
+      : (ctx.plan.variationRate > 0.55 ? 2 : 1);
     for (let v = 0; v < variationCount; v++) {
       const targetIdx = findPitchedIndex(
         slots,
@@ -350,11 +403,11 @@ export function varyMotif(bar: MotifBar, ctx: VaryMotifContext): MotifBar {
       const step = ctx.plan.stepLeapBalance > 0.55 ? 2 : 1;
       const direction = (ctx.barIndex + v) % 2 === 0 ? step : -step;
       degrees[degIdx] = clampDegree(degrees[degIdx] + direction);
-      slots[targetIdx] = retokenize(slots[targetIdx], degrees[degIdx], ctx.scaleNotes);
+      slots[targetIdx] = retokenize(slots[targetIdx], degrees[degIdx], ctx.scaleNotes, ctx.plan);
     }
   }
 
-  return { rhythm: bar.rhythm, degrees, tokens: slots.map((t) => clampRegister(t)) };
+  return { rhythm: bar.rhythm, degrees, tokens: slots.map((t) => clampRegister(t, ctx.plan)) };
 }
 
 /** Bar 3 of a 4-bar phrase: lift contour while keeping rhythm. */
@@ -365,9 +418,9 @@ function developBar(bar: MotifBar, ctx: VaryMotifContext): MotifBar {
     if (token.pitch === 'rest') return { ...token };
     const degIdx = mapTokenToDegreeIndex(bar.tokens, i);
     if (degIdx < 0) return { ...token };
-    return retokenize(token, degrees[degIdx], ctx.scaleNotes);
+    return retokenize(token, degrees[degIdx], ctx.scaleNotes, ctx.plan);
   });
-  return { ...bar, degrees, tokens: tokens.map((t) => clampRegister(t)) };
+  return { ...bar, degrees, tokens: tokens.map((t) => clampRegister(t, ctx.plan)) };
 }
 
 function callResponseBar(bar: MotifBar, ctx: VaryMotifContext): MotifBar {
@@ -377,9 +430,9 @@ function callResponseBar(bar: MotifBar, ctx: VaryMotifContext): MotifBar {
     const degIdx = mapTokenToDegreeIndex(bar.tokens, i);
     if (degIdx < 0) return { ...token };
     const lowered = degrees[degIdx];
-    return retokenize(token, lowered, ctx.scaleNotes);
+    return retokenize(token, lowered, ctx.scaleNotes, ctx.plan);
   });
-  return { ...bar, degrees, tokens: tokens.map((t) => clampRegister(t)) };
+  return { ...bar, degrees, tokens: tokens.map((t) => clampRegister(t, ctx.plan)) };
 }
 
 /** Penultimate bar: approach dominant/subdominant before final cadence. */
@@ -407,6 +460,7 @@ export function applyPenultimateSetup(
     const midi = scale.notes[degree % scale.notes.length];
     slots[slotIdx] = clampRegister(
       makeNote(midi, slots[slotIdx].duration, plan.velocity + 2),
+      plan,
     );
   }
 
@@ -452,24 +506,25 @@ export function applyCadence(
   const holdDuration = plan.cadenceStrength > 0.55
     ? Math.max(slots[lastIdx].duration, 1)
     : slots[lastIdx].duration;
-  slots[lastIdx] = clampRegister(makeNote(tonic, holdDuration, plan.velocity + 10));
+  slots[lastIdx] = clampRegister(makeNote(tonic, holdDuration, plan.velocity + 10), plan);
   slots[lastIdx].source = formatSource(slots[lastIdx]);
 
   return {
     rhythm: bar.rhythm,
     degrees: [...bar.degrees],
-    tokens: slots.map((t) => clampRegister(t)),
+    tokens: slots.map((t) => clampRegister(t, plan)),
   };
 }
 
 /** Keep generated notes in a practical MIDI range. */
-export function clampRegister(token: NoteToken): NoteToken {
+export function clampRegister(token: NoteToken, plan?: MusicPlan): NoteToken {
   if (token.pitch === 'rest') return token;
 
+  const bounds = plan ? melodyMidiBounds(plan) : { min: MIN_MELODY_MIDI, max: MAX_MELODY_MIDI };
   let midi = token.midiNote;
-  while (midi < MIN_MELODY_MIDI) midi += 12;
-  while (midi > MAX_MELODY_MIDI) midi -= 12;
-  midi = Math.max(MIN_MELODY_MIDI, Math.min(MAX_MELODY_MIDI, midi));
+  while (midi < bounds.min) midi += 12;
+  while (midi > bounds.max) midi -= 12;
+  midi = Math.max(bounds.min, Math.min(bounds.max, midi));
 
   if (midi === token.midiNote) return token;
   const pitch = midiToPitch(midi);
@@ -542,20 +597,44 @@ export function tilePhrase(
 export function buildScaleContext(plan: MusicPlan): ScaleContext {
   const intervals = plan.mode === 'major' ? MAJOR : MINOR;
   const brightnessShift = Math.round((plan.brightness - 0.5) * 4);
+  const intent = plan.plannerIntent;
+
+  if (!intent) {
+    const root =
+      keyToPitchClass(plan.key) +
+      (REGISTER_OCTAVE[plan.register] + 1) * 12 +
+      brightnessShift;
+
+    const notes: number[] = [];
+    for (let o = 0; o < 2; o++) {
+      for (const iv of intervals) {
+        notes.push(root + o * 12 + iv);
+      }
+    }
+
+    const filtered = notes.filter((m) => m >= MIN_MELODY_MIDI && m <= MAX_MELODY_MIDI);
+    return { notes: filtered.length > 0 ? filtered : notes, rootMidi: root };
+  }
+
+  const bounds = melodyMidiBounds(plan);
+  const centerMidi = Math.round((bounds.min + bounds.max) / 2);
   const root =
-    keyToPitchClass(plan.key) +
-    (REGISTER_OCTAVE[plan.register] + 1) * 12 +
-    brightnessShift;
+    intent.registerBias === 'wide'
+      ? centerMidi - 12 + (intervals[0] ?? 0)
+      : keyToPitchClass(plan.key) +
+        (REGISTER_OCTAVE[plan.register] + 1) * 12 +
+        brightnessShift;
 
   const notes: number[] = [];
-  for (let o = 0; o < 2; o++) {
+  for (let o = -1; o < 3; o++) {
     for (const iv of intervals) {
       notes.push(root + o * 12 + iv);
     }
   }
 
-  const filtered = notes.filter((m) => m >= MIN_MELODY_MIDI && m <= MAX_MELODY_MIDI);
-  return { notes: filtered.length > 0 ? filtered : notes, rootMidi: root };
+  const filtered = notes.filter((m) => m >= bounds.min && m <= bounds.max);
+  const fallback = notes.filter((m) => m >= MIN_MELODY_MIDI && m <= MAX_MELODY_MIDI);
+  return { notes: filtered.length > 0 ? filtered : fallback, rootMidi: root };
 }
 
 function keyToPitchClass(key: string): number {
@@ -583,15 +662,20 @@ function rhythmToTokens(
     }
     const degree = degrees[degreeIdx++];
     const midi = scale[degree % scale.length];
-    tokens.push(clampRegister(makeNote(midi, slot.duration, plan.velocity)));
+    tokens.push(clampRegister(makeNote(midi, slot.duration, plan.velocity), plan));
   }
 
   return tokens;
 }
 
-function retokenize(token: NoteToken, degree: number, scaleNotes: number[]): NoteToken {
+function retokenize(
+  token: NoteToken,
+  degree: number,
+  scaleNotes: number[],
+  plan?: MusicPlan,
+): NoteToken {
   const midi = scaleNotes[degree % scaleNotes.length];
-  return clampRegister(makeNote(midi, token.duration, token.velocity));
+  return clampRegister(makeNote(midi, token.duration, token.velocity), plan);
 }
 
 function findPitchedIndex(tokens: NoteToken[], nth: number): number {

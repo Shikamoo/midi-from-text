@@ -169,10 +169,17 @@ export function resolveStylePreset(plan: MusicPlan): StylePreset {
 
 /** Resolve phrase shape from plan repetition + preset default. */
 export function resolvePhraseShape(plan: MusicPlan, preset: StylePreset): StylePreset['phraseShape'] {
-  if (plan.repetition === 'high' && plan.variationRate < 0.42) {
+  const intent = plan.plannerIntent;
+  if (intent) {
+    if (intent.repetitionLevel > 0.65 && intent.variationLevel < 0.42) {
+      return 'exact-repeat';
+    }
+    if (intent.repetitionLevel < 0.35 || intent.variationLevel > 0.62) {
+      return 'call-response';
+    }
+  } else if (plan.repetition === 'high' && plan.variationRate < 0.42) {
     return 'exact-repeat';
-  }
-  if (plan.repetition === 'low' || plan.variationRate > 0.62) {
+  } else if (plan.repetition === 'low' || plan.variationRate > 0.62) {
     return 'call-response';
   }
   if (plan.motifStrength > 0.62 && preset.phraseShape === 'call-response') {

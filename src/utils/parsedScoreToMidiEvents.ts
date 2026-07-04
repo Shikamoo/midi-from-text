@@ -7,6 +7,7 @@
 
 import type { MusicData, NoteEvent, ParsedScore, Track } from '../types/music';
 import { HARMONY_INSTRUMENT, harmonyTokensToNoteEvents } from './score/harmony';
+import { BASS_INSTRUMENT } from './score/texture';
 import { harmonyNotesPerChord } from './harmonySettings';
 
 export interface ScoreExportMetadata {
@@ -56,6 +57,14 @@ export function parsedScoreToMusicData(
         score.beatsPerBar,
         harmonyNotesPerChord(score.harmonyGeneration),
       ),
+    });
+  }
+
+  if (score.bassTokens && score.bassTokens.length > 0) {
+    tracks.push({
+      name: 'Bass',
+      instrument: BASS_INSTRUMENT,
+      notes: parsedScoreToNoteEvents({ ...score, tokens: score.bassTokens }),
     });
   }
 

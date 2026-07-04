@@ -22,6 +22,7 @@ import {
 import type { DetectedMode, HarmonyGenerationSettings, MusicData, ParsedScore, ParseIssue } from '../types/music';
 import type { MusicPlan, PlanAssumption } from '../types/musicPlan';
 import type { LlmMusicPlan } from '../types/llmMusicPlan';
+import type { FieldMappingNote } from './localPlanner/mappingAudit';
 import { DEFAULT_HARMONY_GENERATION } from './harmonySettings';
 
 export interface PromptPlanOverride {
@@ -31,6 +32,8 @@ export interface PromptPlanOverride {
   source?: 'ollama' | 'fallback' | 'rules';
   plannerMessage?: string | null;
   llmPlan?: LlmMusicPlan | null;
+  mappingAudit?: FieldMappingNote[];
+  mappingAuditSummary?: string;
 }
 
 export interface ParseMusicInputOptions {

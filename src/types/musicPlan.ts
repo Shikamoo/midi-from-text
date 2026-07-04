@@ -39,6 +39,31 @@ export type Register = 'low' | 'mid' | 'high';
 /** How strongly the motif repeats across bars */
 export type Repetition = 'low' | 'medium' | 'high';
 
+/** Planner texture — preserved when mapped from local planner */
+export type PlannerTexture =
+  | 'monophonic'
+  | 'melody+bass'
+  | 'melody+chords'
+  | 'polyphonic';
+
+export type PlannerRegisterBias = 'low' | 'mid' | 'high' | 'wide';
+
+/**
+ * High-fidelity planner dimensions passed into generation.
+ * Omitted by rule-based promptToPlan — legacy enums drive output instead.
+ */
+export interface PlannerGenerationIntent {
+  texture: PlannerTexture;
+  registerBias: PlannerRegisterBias;
+  rhythmDensity: number;
+  restDensity: number;
+  syncopationLevel: number;
+  repetitionLevel: number;
+  variationLevel: number;
+  harmonicComplexity: number;
+  melodicRange: { min: string; max: string };
+}
+
 /** Continuous musical dimensions (0 = low, 1 = high) */
 export type PlanDimension =
   | 'groove'
@@ -82,12 +107,14 @@ export interface MusicPlan {
   syncopation: Syncopation;
   register: Register;
   repetition: Repetition;
-  /** Length of the seed motif in bars (1 or 2) */
+  /** Length of the seed motif in bars (1–16 when from planner; legacy parser uses 1–2) */
   motifLength: number;
   /** GM program number 0–127 */
   instrument: number;
   /** Base note velocity 0–127 */
   velocity: number;
+  /** Local-planner intent — when set, generation prefers these over coarse enums */
+  plannerIntent?: PlannerGenerationIntent;
   /** Syncopation / pocket feel (0–1) */
   groove: number;
   /** Tonal brightness / register lift (0–1) */

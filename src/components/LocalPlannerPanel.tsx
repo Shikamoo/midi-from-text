@@ -13,6 +13,7 @@ interface LocalPlannerPanelProps {
   model: string | null;
   llmPlan: PlannerMusicPlan | null;
   generatorPlan: MusicPlan | null;
+  mappingAuditSummary?: string | null;
   seed: number;
   temperature: number;
   variation: number;
@@ -55,6 +56,7 @@ export function LocalPlannerPanel({
   model,
   llmPlan,
   generatorPlan,
+  mappingAuditSummary,
   seed,
   temperature,
   variation,
@@ -157,6 +159,12 @@ export function LocalPlannerPanel({
           </dl>
           <p className="planner-debug-label">PlannerMusicPlan (validated)</p>
           <pre className="planner-json">{JSON.stringify(llmPlan, null, 2)}</pre>
+          {mappingAuditSummary && (
+            <>
+              <p className="planner-debug-label">Mapping audit</p>
+              <pre className="planner-json planner-audit">{mappingAuditSummary}</pre>
+            </>
+          )}
           {generatorPlan && (
             <>
               <p className="planner-debug-label">Generator MusicPlan (mapped)</p>

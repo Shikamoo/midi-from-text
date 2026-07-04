@@ -289,6 +289,8 @@ export interface ParsedScore {
    * (root, third, fifth) with bar-length duration. Omitted for note-mode scores.
    */
   harmonyTokens?: NoteToken[];
+  /** Bass line from melody+bass texture (prompt pipeline). */
+  bassTokens?: NoteToken[];
   /** Generation settings used to produce harmonyTokens (prompt pipeline). */
   harmonyGeneration?: HarmonyGenerationSettings;
   bpm: number;
